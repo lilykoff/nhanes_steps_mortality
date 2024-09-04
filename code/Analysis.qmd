@@ -98,6 +98,7 @@ df_all %>%
 
 acc_subset = df_all %>% 
   filter(has_accel)
+
 acc_subset %>% 
   group_by(data_release_cycle) %>% 
   count()
@@ -124,7 +125,7 @@ acc_subset %>%
   count(b50, o80)
 
 acc_subset %>% 
-  filter(num_num_valid_days >= 3 & age_in_years_at_screening >= 50 & age_in_years_at_screening < 80) %>% 
+  filter(num_valid_days >= 3 & age_in_years_at_screening >= 50 & age_in_years_at_screening < 80) %>% 
   filter(!(if_all(.cols = c(age_in_years_at_screening, gender,
                           race_hispanic_origin, cat_education,
                           cat_bmi, chd, chf, heartattack, stroke, cancer,
@@ -280,6 +281,84 @@ df_accel_win %>%
        subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
 
 ```
+```{r}
+#| eval: false
+#| include: false 
+#| 
+s = df_accel %>%
+  select(contains("steps") & contains("mean"), SEQN, gender) %>% 
+  pivot_longer(cols = -c(SEQN, gender)) %>% 
+  mutate(name = factor(name, labels = c("Actilife", "ADEPT", "Oak", "Sc. RF", "Sc. SSL", "Verisense", "Verisense rev."))) %>% 
+  ggplot(aes(x = value / 1000, fill = gender, col = gender))+
+  geom_density() + 
+  facet_grid(gender~name)+
+  theme_bw() + 
+  scale_fill_manual(values = c(col1, col2))+
+  scale_color_manual(values = c(col1, col2))+
+  theme(legend.position = "none",
+        panel.grid.minor.x = element_blank(),
+        axis.title = element_text(size = 14)) + 
+  labs(x = "Mean Daily Steps x 1000", y = "Density", title = "Distribution of Mean Step Counts",
+       subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
+
+swin = df_accel_win %>%
+  select(contains("steps") & contains("mean"), SEQN, gender) %>% 
+  pivot_longer(cols = -c(SEQN, gender)) %>% 
+  mutate(name = factor(name, labels = c("Actilife", "ADEPT", "Oak", "Sc. RF", "Sc. SSL", "Verisense", "Verisense rev."))) %>% 
+  ggplot(aes(x = value / 1000, fill = gender, col = gender))+
+  geom_density() + 
+  facet_grid(gender~name)+
+  theme_bw() + 
+  scale_fill_manual(values = c(col1, col2))+
+  scale_color_manual(values = c(col1, col2))+
+  theme(legend.position = "none",
+        panel.grid.minor.x = element_blank(),
+        axis.title = element_text(size = 14)) + 
+  labs(x = "Mean Daily Steps x 1000", y = "Density", title = "Distribution of Winsorized Mean Step Counts",
+       subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
+
+s + swin + plot_layout(nrow = 2, axis_titles = "collect")
+
+ggsave(here::here("manuscript", "figures", "step_dist.png"), width = 10, height = 10, dpi = 350)
+
+pa = df_accel %>%
+  select(!contains("steps") & contains("mean"), SEQN, gender) %>% 
+  pivot_longer(cols = -c(SEQN, gender)) %>% 
+  mutate(name = factor(name, labels = c("AC", "log10 AC", "log10 MIMS", "MIMS"))) %>%
+  ggplot(aes(x = value, fill = gender, col = gender))+
+  geom_density() + 
+  facet_wrap(gender~name, scales = "free")+
+  theme_bw() + 
+  scale_fill_manual(values = c(col1, col2))+
+  scale_color_manual(values = c(col1, col2))+
+  theme(legend.position = "none",
+        panel.grid.minor.x = element_blank(),
+        axis.title = element_text(size = 14)) + 
+  labs(x = "Mean Daily Value", y = "Density", title = "Distribution of Mean PA Variables",
+       subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
+
+pa_win = df_accel_win %>%
+  select(!contains("steps") & contains("mean"), SEQN, gender) %>% 
+  pivot_longer(cols = -c(SEQN, gender)) %>% 
+  mutate(name = factor(name, labels = c("AC", "log10 AC", "log10 MIMS", "MIMS"))) %>%
+  ggplot(aes(x = value, fill = gender, col = gender))+
+  geom_density() + 
+  facet_wrap(gender~name, scales = "free")+
+  theme_bw() + 
+  scale_fill_manual(values = c(col1, col2))+
+  scale_color_manual(values = c(col1, col2))+
+  theme(legend.position = "none",
+        panel.grid.minor.x = element_blank(),
+        axis.title = element_text(size = 14)) + 
+  labs(x = "Mean Daily Value", y = "Density", title = "Distribution of Winsorized Mean PA Variables",
+       subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
+
+pa + pa_win + plot_layout(nrow = 2, axis_titles = "collect")
+
+ggsave(here::here("manuscript", "figures", "pa_dist.png"), width = 10, height = 10, dpi = 350)
+
+```
+
 
 
 ```{r}
@@ -536,7 +615,60 @@ results %>%
 ```
 
 
+```{r}
+#| eval: false
+#| include: false 
 
+p1 = results %>% 
+  filter(grepl("step", metric) & grepl("mean", metric)) %>%
+  mutate(across(contains("fitted"), ~.x / 1000),
+                metric = factor(metric, levels = c("mean_acti_steps", 
+                                            "mean_adept_steps",
+                                            "mean_oak_steps_80",
+                                            "mean_vs_steps_15",
+                                            "mean_vs_revised_steps_15",
+                                            "mean_scssl_steps",
+                                            "mean_scrf_steps"),
+                         labels = c("Actilife", "ADEPT", "Oak", "Verisense", "Verisense rev.", "Stepcount SSL", "Stepcount RF"))) %>% 
+  ggplot(aes(x = age_in_years_at_screening, y = fitted_mean,
+             ymin = fitted_lb, ymax = fitted_ub, color = gender, fill = gender)) +
+  facet_grid(. ~ metric) +
+  geom_line() + 
+  geom_ribbon(alpha = .2, linetype = 0) +
+  scale_color_manual(values = c(col1, col2), name = "")+
+  scale_fill_manual(values = c(col1, col2), name = "")+
+  theme_light() +
+  theme(legend.position = "bottom",
+        legend.title = element_blank()) +
+  labs(x = "Age (yrs)", y = "Mean Daily Steps x 1000")+
+  scale_y_continuous(breaks=seq(0,16,2))
+
+
+
+p2 = results %>% 
+  filter(grepl("mean", metric) & !grepl("step", metric)) %>%
+  mutate(across(contains("fitted"), ~.x / 1000),
+                metric = factor(metric, levels = c("mean_AC", "mean_log10AC",
+                                                   "mean_PAXMTSM","mean_log10PAXMTSM"),
+                         labels = c("AC", "log10 AC", "MIMS", "log10 MIMS"))) %>% 
+  ggplot(aes(x = age_in_years_at_screening, y = fitted_mean,
+             ymin = fitted_lb, ymax = fitted_ub, color = gender, fill = gender)) +
+  facet_wrap(. ~ metric, scales = "free", nrow = 1) +
+  geom_line() + 
+  geom_ribbon(alpha = .2, linetype = 0) +
+  scale_color_manual(values = c(col1, col2), name = "")+
+  scale_fill_manual(values = c(col1, col2), name = "")+
+  theme_light() +
+  theme(legend.position = "bottom",
+        legend.title = element_blank()) +
+  labs(x = "Age (yrs)", y = "Mean Variable x 1000")
+
+
+p1 + p2 + plot_layout(guides = "collect", nrow = 2, axis_titles = "collect") & theme(legend.position = 'bottom')
+
+ggsave(here::here("manuscript", "figures", "means_by_sex.png"), dpi = 400, width = 10, height = 8)
+
+```
 
 ## Correlations between Step Counts and AC/MIMS 
 
@@ -571,78 +703,14 @@ corrplot::corrplot(cor_mat,
          order = "AOE",
         title = "Spearman Correlations",
         addCoef.col = 'black') 
-# svg(here::here("manuscript", "figures", "correlation.svg"), width = 8, height = 8)
 
 ```
 
 
-```{r}
-#| eval: false 
-#| include: false 
-# pearson correlations 
-
-cor_mat = 
-  df_pa %>% select(contains("mean")) %>%
-  cor(., use = "complete", method = "pearson") 
-pvals = df_pa %>% select(contains("mean")) %>%
-  rstatix::cor_pmat(.) %>% 
-  select(-rowname) %>% 
-  as.matrix()
-colnames(cor_mat) = rownames(cor_mat) =colnames(pvals) = rownames(pvals) = c("AC", "Actilife", "ADEPT", "log10 AC", "log10 MIMS", "Oak", "MIMS", "Sc. RF", "Sc. SSL", "Vs rev.", "Vs")
-
-cor_mat = df_pa %>% 
-  select(mean_acti_steps, mean_adept_steps,
-         mean_oak_steps_80, mean_scrf_steps,
-         mean_scssl_steps, mean_vs_steps_15,
-         mean_vs_revised_steps_15, mean_AC, mean_log10AC,
-         mean_PAXMTSM, mean_log10PAXMTSM) %>% 
-  cor(., use = "complete", method = "pearson")
-
-pvals = df_pa %>% select(mean_acti_steps, mean_adept_steps,
-         mean_oak_steps_80, mean_scrf_steps,
-         mean_scssl_steps, mean_vs_steps_15,
-         mean_vs_revised_steps_15, mean_AC, mean_log10AC,
-         mean_PAXMTSM, mean_log10PAXMTSM) %>%
-  rstatix::cor_pmat(.) %>% 
-  select(-rowname) %>% 
-  as.matrix()
-colnames(cor_mat) = rownames(cor_mat) =colnames(pvals) = rownames(pvals) = c("Actilife", "ADEPT","Oak", "Sc. RF", "Sc. SSL", "Vs", "Vs rev", "AC", "log10 AC", "MIMS", "log10 MIMS")
-
-
-corrplot::corrplot(cor_mat,  
-         method="circle", 
-         type="lower", 
-         # col=paletteer_d("colorBlindness::Blue2DarkRed12Steps"), 
-        col= paletteer_d("colorBlindness::Blue2Orange8Steps"),
-         tl.col="black", 
-         tl.srt=45, 
-         p.mat = pvals,
-         col.lim=c(0.2,1),
-         sig.level = 0.05, 
-         insig = "blank",
-         is.corr = FALSE,
-        diag = FALSE,
-         order = "original",
-        title = "Pearson Correlations",
-        addCoef.col = 'black') 
-
-# corrplot::corrplot(cor_mat,  
-#          method="square", 
-#          type="upper", 
-#          col=paletteer_d("colorBlindness::Green2Magenta16Steps", n = 10), 
-#          tl.col="black", 
-#          tl.srt=45, 
-#          p.mat = pvals,
-#          col.lim=c(.2,1),
-#          sig.level = 0.05, 
-#          insig = "blank",
-#          is.corr = FALSE, 
-#          order = "AOE")
-
-```
 
 ```{r}
 #| eval: false
+#| include: false 
 # correlations by sex 
 
 cor_mat = 
@@ -875,6 +943,17 @@ f / m
 
 ```
 
+```{r}
+#| eval: false
+#| include: false 
+f / m + plot_layout(nrow = 2, axis_titles = "collect")
+ggsave(here::here("manuscript", "figures", "single_concordance.svg"), width = 8, height = 8)
+ggsave(here::here("manuscript", "figures", "single_concordance.png"), width = 8, height = 8,
+       dpi = 350)
+
+```
+
+
 ## Comparison with cadence estimates 
 
 Supplement? 
@@ -943,9 +1022,20 @@ f = wt_single_female %>%
   labs(x = "Mean 100x 10-fold Cross-Validated Concordance", y = "")
   
 f / m
-# ggsave(here::here("manuscript", "figures", "single_concordance_cadence.svg"), width = 8, height = 8)
 
 ```
+```{r}
+#| eval: false
+#| include: false
+
+f / m + plot_layout(nrow = 2, axis_titles = "collect")
+ggsave(here::here("manuscript", "figures", "single_concordance_cadence.svg"), width = 8, height = 8)
+ggsave(here::here("manuscript", "figures", "single_concordance_cadence.png"), width = 8, height = 8,
+       dpi = 350)
+
+```
+
+
 
 ## Hazard ratio forest plots
 
@@ -1015,7 +1105,7 @@ m =
   left_join(var_labels, by = c("term" = "names")) %>%
   mutate(labels = factor(labels),
          labels = fct_reorder(labels, hr, mean, .desc = TRUE),
-         grp = "Male") %>%
+         grp = "Male - Raw") %>%
   ggplot(aes(color = term)) +
   geom_point(aes(y = labels, x = hr), size = 2)+
   geom_errorbarh(aes(xmin = ci_low, xmax = ci_high, y = labels), linewidth = 1.1)+
@@ -1034,7 +1124,7 @@ f =
   left_join(var_labels, by = c("term" = "names")) %>%
   mutate(labels = factor(labels),
          labels = fct_reorder(labels, hr, mean, .desc = TRUE),
-         grp = "Female") %>%
+         grp = "Female - Raw") %>%
   ggplot(aes(color = term)) +
   geom_point(aes(y = labels, x = hr), size = 2)+
   geom_errorbarh(aes(xmin = ci_low, xmax = ci_high, y = labels), linewidth = 1.1)+
@@ -1058,14 +1148,14 @@ steps_res_scaled =
          ci_high = exp(estimate + (1.96 * std.error))) %>% 
   left_join(var_labels, by = c("term" = "names"))
 
-m = 
+msc = 
   steps_res_scaled %>% 
   filter(sex == "Male" & grepl("steps", term)) %>% 
   mutate(term2 = factor(term),
          term2 = fct_reorder(term2, hr, mean, .desc = TRUE),
          labels = factor(labels),
          labels = fct_reorder(labels, hr, mean, .desc = TRUE),
-         grp = "Male") %>%
+         grp = "Male - Scaled") %>%
   ggplot(aes(color = term)) +
   geom_point(aes(y = labels, x = hr), size = 2)+
   geom_errorbarh(aes(xmin = ci_low, xmax = ci_high, y = labels), linewidth = 1.1)+
@@ -1078,14 +1168,14 @@ m =
   geom_vline(aes(xintercept = 1), linetype = "dashed")+
   labs(x = "Adjusted HR Associated with One SD Increase in Mean Steps per Day", y = "")
 
-f = 
+fsc = 
   steps_res_scaled %>% 
   filter(sex == "Female" & grepl("steps", term)) %>% 
   mutate(term2 = factor(term),
          term2 = fct_reorder(term2, hr, mean, .desc = TRUE),
          labels = factor(labels),
          labels = fct_reorder(labels, hr, mean, .desc = TRUE),
-         grp = "Female") %>%
+         grp = "Female - Scaled") %>%
   ggplot(aes(color = term)) +
   geom_point(aes(y = labels, x = hr), size = 2)+
   geom_errorbarh(aes(xmin = ci_low, xmax = ci_high, y = labels), linewidth = 1.1)+
@@ -1099,156 +1189,25 @@ f =
   labs(x = "", y = "")
 
 
-f / m
+fsc / msc
 # ggsave(here::here("manuscript", "figures", "forest_scaled.svg"), width = 8, height = 8)
 ```
 
+
 ```{r}
-#| eval: false 
-#| 
-pa_vars = df_mortality_win %>% 
-  select(contains("mean") & contains("steps")) %>% 
-  colnames()
+#| eval: false
+#| include: false 
+# 
+# f + fsc + m + msc + plot_layout(nrow = 2, ncol =2)
 
-df_mortality_win_scaled = 
-  df_mortality_win %>% 
-  mutate(across(c(contains("mean")), ~scale(.x)))
-
-
-fit_model = function(var, df){
-  
-  male_df =
-    df %>%
-    filter(gender == "Male") %>%
-    mutate(weight = full_sample_2_year_mec_exam_weight / 2, weight_norm = weight / mean(weight))
-  
-  female_df =
-    df  %>%
-    filter(gender == "Female") %>%
-    mutate(weight = full_sample_2_year_mec_exam_weight / 2, weight_norm = weight / mean(weight))
-
-
-  formula = as.formula(paste0("Surv(event_time, mortstat) ~", var, "+ 
-      age_in_years_at_screening + cat_education + bin_diabetes + cat_bmi +
-      race_hispanic_origin +
-      cat_bmi +
-      cat_education +
-      chf +
-      chd +
-      heartattack +
-      stroke +
-      cancer +
-      bin_diabetes +
-      cat_alcohol +
-      cat_smoke +
-      bin_mobilityproblem +
-      general_health_condition"))
-    mmodel = coxph(formula, data = male_df, weights = weight_norm) %>% 
-      tidy() %>% 
-      filter(grepl(var, term)) %>% 
-      mutate(sex = "Male") 
-    fmodel = coxph(formula, data = female_df, weights = weight_norm) %>% 
-      tidy() %>% 
-      filter(grepl(var, term)) %>% 
-      mutate(sex = "Female") 
-    bind_rows(mmodel, fmodel)
-}
-
-
-steps_res = 
-  map_dfr(.x = pa_vars,
-          .f = fit_model,
-          df = df_mortality_win) %>% 
-  mutate(hr = exp(estimate * 500),
-         ci_low = exp(500*(estimate - (1.96 * std.error))),
-         ci_high = exp(500*(estimate + (1.96 * std.error))))
-
-m1 = 
-  steps_res %>% 
-  filter(sex == "Male") %>% 
-  mutate(term2 = factor(term),
-         term2 = fct_reorder(term2, hr, mean, .desc = TRUE)) %>%
-  ggplot(aes(color = term)) +
-  geom_point(aes(y = term2, x = hr), size = 2)+
-  geom_errorbarh(aes(xmin = ci_low, xmax = ci_high, y = term2), linewidth = 1.1)+
-  theme_bw() + 
-  scale_color_paletteer_d("ggthemes::few_Dark")+
-  theme(legend.position = "none") + 
-    scale_x_continuous(limits=c(0.7, 1), breaks=seq(0.7, 1, .05)) +
-  # facet_wrap(.~sex)+
-  labs(x = "Adjusted HR Associated with 500-step Increase in Mean Steps per Day", title = "Male - Raw", y = "")
-
-f1 = 
-  steps_res %>% 
-  filter(sex == "Female") %>% 
-  mutate(term2 = factor(term),
-         term2 = fct_reorder(term2, hr, mean, .desc = TRUE)) %>%
-  ggplot(aes(color = term)) +
-  geom_point(aes(y = term2, x = hr), size = 2)+
-  geom_errorbarh(aes(xmin = ci_low, xmax = ci_high, y = term2), linewidth = 1.1)+
-  theme_bw() + 
-  scale_color_paletteer_d("ggthemes::few_Dark")+
-  theme(legend.position = "none") + 
-    scale_x_continuous(limits=c(0.7, 1), breaks=seq(0.7, 1, .05)) +
-  # facet_wrap(.~sex)+
-  labs(x = "", title = "Female - Raw", y = "")
-
-
-
-steps_res_scaled = 
-  map_dfr(.x = c(pa_vars, "mean_PAXMTSM", "mean_AC"),
-          .f = fit_model,
-          df = df_mortality_win_scaled) %>% 
-  mutate(hr = exp(estimate),
-         ci_low = exp(estimate - (1.96 * std.error)),
-         ci_high = exp(estimate + (1.96 * std.error)))
-
-m = 
-  steps_res_scaled %>% 
-  filter(sex == "Male" & grepl("steps", term)) %>% 
-  mutate(term2 = factor(term),
-         term2 = fct_reorder(term2, hr, mean, .desc = TRUE)) %>%
-  ggplot(aes(color = term)) +
-  geom_point(aes(y = term2, x = hr), size = 2)+
-  geom_errorbarh(aes(xmin = ci_low, xmax = ci_high, y = term2), linewidth = 1.1)+
-  theme_bw() + 
-  scale_color_paletteer_d("ggthemes::few_Dark")+
-  theme(legend.position = "none") + 
-  scale_x_continuous(limits=c(0.3, 1), breaks=seq(0.3, 1, .05))+
-  # facet_wrap(.~sex)+
-  labs(x = "Adjusted HR Associated with One SD Increase in Mean Steps per Day", title = "Male - Standardized", y = "")
-
-f = 
-  steps_res_scaled %>% 
-  filter(sex == "Female" & grepl("steps", term)) %>% 
-  mutate(term2 = factor(term),
-         term2 = fct_reorder(term2, hr, mean, .desc = TRUE)) %>%
-  ggplot(aes(color = term)) +
-  geom_point(aes(y = term2, x = hr), size = 2)+
-  geom_errorbarh(aes(xmin = ci_low, xmax = ci_high, y = term2), linewidth = 1.1)+
-  theme_bw() + 
-  scale_color_paletteer_d("ggthemes::few_Dark")+
-  theme(legend.position = "none") + 
-  scale_x_continuous(limits=c(0.3, 1), breaks=seq(0.3, 1, .05))+
-  # facet_wrap(.~sex)+
-  labs(x = "", title = "Female - Standardized", y = "")
-
-
-f1 + f + m1 + m + plot_layout(nrow = 2, ncol =2)
-
-tab = steps_res_scaled %>% 
-  mutate(type = "scaled") %>% 
-  dplyr::select(sex, type, term, hr, ci_low, ci_high) %>% 
-  bind_rows(steps_res %>% mutate(type = "raw") %>% 
-  dplyr::select(sex, type, term, hr, ci_low, ci_high)) %>% 
-  mutate(ci = paste0(sprintf("%0.3f",round(hr, 3)),
-                       " (", sprintf("%0.3f",round(ci_low, 3)), ", ", sprintf("%0.3f",round(ci_high, 3)), ")")) %>% 
-   arrange(sex, hr) %>% 
-  select(-hr, -ci_low, -ci_high) %>% 
-  pivot_wider(names_from = type, values_from = ci) %>% 
-  filter(grepl("steps", term)) %>% 
-  kableExtra::kbl("latex", booktabs = TRUE)
+f /  m 
+ggsave(here::here("manuscript", "figures", "forest_raw.png"), width = 8, height = 8, dpi = 350)
+fsc / msc
+ggsave(here::here("manuscript", "figures", "forest_scaled.png"), width = 8, height = 8, dpi = 350)
 ```
+
+
+
 
 
 ```{r}
@@ -1486,6 +1445,59 @@ df_svy %>%
   add_overall() %>% 
   modify_caption("Demographic Characteristics, All Adults")
 
+
+df_svy =
+  df_all %>%
+  filter(has_accel) %>%
+  filter(valid_accel) %>%
+  mutate(
+    mortstat_fac = factor(
+      mortstat,
+      levels = c(0, 1),
+      labels = c("Alive", "Deceased")
+    ),
+    svy_year_fac = factor(
+      data_release_cycle,
+      levels = c(7, 8),
+      labels = c("2011-2012", "2013-2014")
+    ),
+    WTMEC4YR = full_sample_2_year_mec_exam_weight / 2,
+    WTMEC4YR_norm = WTMEC4YR / mean(WTMEC4YR)
+  ) %>%
+  svydesign(
+    ids = ~ masked_variance_pseudo_psu,
+    weights = ~ WTMEC4YR_norm,
+    strata = ~ masked_variance_pseudo_stratum,
+    data = .,
+    nest = TRUE
+  )
+vars_table1 = c("age_years_interview","gender","race","BMI_cat","education_adult",
+                 "overall_health_combined","diabetes","heart_attack","CHF","CHD","stroke","cancer",
+                 "mobility_problem", "alcohol_consumption_fac","cigarette_smoking","TMIMS_mean","TAT_mean","TMVT_mean","ASTP_mean","RA_MIMS_mean",
+                 "mortstat_fac")
+
+vars_table1 = c( "gender",
+   "age_in_years_at_screening",
+    "race_hispanic_origin",
+    "cat_education",
+    "cat_bmi",
+    "bin_diabetes",
+    "chf",
+    "chd",
+    "stroke",
+    "cat_alcohol",
+    "cat_smoke",
+    "bin_mobilityproblem",
+    "general_health_condition",
+    "mortstat_fac")
+  
+table_1 = tableone::svyCreateTableOne(vars=vars_table1, strata="svy_year_fac", test=TRUE, data=df_svy, addOverall = TRUE)
+
+```
+
+```{r}
+#| eval: false
+#| include: false 
 tb = df_svy %>%
   tbl_svysummary(
     by = data_release_cycle,
@@ -1513,6 +1525,7 @@ Option 1: by wave and age
 # with PA
 
 df_adult = df_accel %>% 
+  filter(age_in_years_at_screening >= 18) %>%
   mutate(weight = full_sample_2_year_mec_exam_weight / 2,
          weight_norm = weight / mean(weight)) %>%
   mutate(group = "All adults")
@@ -1568,7 +1581,11 @@ df_analysis_svy %>%
     .header = "**Wave {strata}**, N = {n}"
   ) %>% 
   modify_caption("Physical Activity Mean Totals Stratified by Age and Wave")
+```
 
+```{r}
+#| eval: false
+#| include: false 
 tb = df_analysis_svy %>% 
   tbl_strata(
     strata = data_release_cycle,
@@ -3239,9 +3256,13 @@ model_steps_mims %>%
 
 Use anyone with at least one valid day, compute results 
 
+## Single variable 
+
 ```{r}
-sens_male_single = readRDS(here::here("results", "metrics_wtd_100_singlevar_male_sens.rds")) 
-sens_female_single = readRDS(here::here("results", "metrics_wtd_100_singlevar_female_sens.rds")) 
+sens_male_single = readRDS(here::here("results", "metrics_wtd_100_singlevar_male_sens.rds"))  %>% 
+  filter(!grepl("peak", variable))
+sens_female_single = readRDS(here::here("results", "metrics_wtd_100_singlevar_female_sens.rds")) %>% 
+  filter(!grepl("peak", variable))
 
 df_mortality_sens =
   df_all %>%
@@ -3461,16 +3482,225 @@ data_summary %>%
 
 ```
 
+## Multivariable 
 
 ```{r}
-#| eval: false
-#| include: false 
-ggplot(df_mortality_win,
-       aes(x = permth_exm, y = permth_int))+
-  geom_point(size = .8) + 
-  geom_abline(slope = 1)
-# plot(df_mortality_win$permth_exm, df_mortality_win$permth_int)
+sens_male = readRDS(here::here("results", "metrics_wtd_100_male_sens.rds"))  
+sens_female = readRDS(here::here("results", "metrics_wtd_100_female_sens.rds"))  
+
+sens_male %>%
+  group_by(model) %>%
+  summarize(across(concordance, list(
+    mean = ~ mean(.x), se = ~ sd(.x) / sqrt(n())
+  ))) %>%
+  arrange(desc(concordance_mean))
+
+sens_female %>%
+  group_by(model) %>%
+  summarize(across(concordance, list(
+    mean = ~ mean(.x), se = ~ sd(.x) / sqrt(n())
+  ))) %>%
+  arrange(desc(concordance_mean))
 
 
+```
+```{r}
+wt_male_small = 
+  sens_male %>% 
+  filter(model %in% c("Demo only", "adept_steps+PAXMTSM", "adept_steps", "PAXMTSM"))
+
+summary = 
+  wt_male_small %>% 
+  group_by(model) %>% 
+  summarize(across(concordance, list(mean = ~mean(.x),
+                                       se = ~sd(.x)/sqrt(n())))) %>% 
+  mutate(model_fac = factor(model, labels = c("Demographics + ADEPT",
+                                              "Demographics + ADEPT + MIMS", 
+                                              "Demographics only", 
+                                              "Demographics + MIMS")))
+
+coef_adept = 
+  df_mortality_sens %>% 
+  filter(gender == "Male") %>% 
+  mutate(
+     weight = full_sample_2_year_mec_exam_weight / 2,
+                weight_norm = weight / mean(weight)) %>% 
+  coxph(Surv(event_time, mortstat) ~ mean_adept_steps + 
+          age_in_years_at_screening + cat_education + bin_diabetes + cat_bmi + 
+          race_hispanic_origin + chf + general_health_condition + chd + 
+          heartattack + cancer + stroke + cat_alcohol + cat_smoke + 
+          bin_mobilityproblem, weights = weight_norm, data  = .) %>% 
+  tidy() %>% 
+  select(term, estimate, std.error, robust.se, p.value) %>% 
+  filter(grepl("steps", term)) %>% 
+  mutate(hr = exp(estimate * 500), 
+         lb = exp((estimate - 1.96 * std.error) * 500),
+         ub = exp((estimate + 1.96 * std.error) * 500),
+         model = "adept_steps")
+  
+coef_mims = 
+  df_mortality_sens %>% 
+  filter(gender == "Male") %>% 
+  mutate(
+     weight = full_sample_2_year_mec_exam_weight / 2,
+                weight_norm = weight / mean(weight)) %>% 
+  coxph(Surv(event_time, mortstat) ~ mean_PAXMTSM + mean_adept_steps + 
+          age_in_years_at_screening + cat_education + bin_diabetes + cat_bmi + 
+          race_hispanic_origin + chf + general_health_condition + chd + 
+          heartattack + cancer + stroke + cat_alcohol + cat_smoke + 
+          bin_mobilityproblem, weights = weight_norm, data  = .) %>% 
+  tidy() %>% 
+  select(term, estimate, std.error, robust.se, p.value) %>% 
+  filter(grepl("steps", term)) %>% 
+  mutate(hr = exp(estimate * 500), 
+         lb = exp((estimate - 1.96 * std.error) * 500),
+         ub = exp((estimate + 1.96 * std.error) * 500),
+         model = "adept_steps+PAXMTSM")
+  
+coefs = bind_rows(coef_adept, coef_mims)
+summary %>% 
+  left_join(coefs)  %>% 
+  mutate(conc_lb = concordance_mean - 1.96 * concordance_se,
+         conc_ub = concordance_mean + 1.96 * concordance_se,
+         conc_ci = paste0(sprintf("%0.3f",round(concordance_mean, 3)),
+                       " (", sprintf("%0.3f",round(conc_lb, 3)), ", ", sprintf("%0.3f",round(conc_ub, 3)), ")"),
+         hr_ci = case_when(!is.na(hr) ~ paste0(sprintf("%0.3f",round(hr, 3)),
+                       " (", sprintf("%0.3f",round(lb, 3)), ", ", sprintf("%0.3f",round(ub, 3)), ")"),
+                       TRUE ~ "---"),
+         p.value = format.pval(p.value, digits = 3)) %>% 
+  select(model_fac, hr_ci,p.value, conc_ci) %>% 
+  rename(Model = model_fac,
+         "Steps HR" = hr_ci,
+         "Steps p-value" = p.value,
+         "Model concordance" = conc_ci) %>% 
+  gt::gt() %>%
+    # gt::fmt_number(columns = starts_with("mean"), decimals = 0) %>% 
+    tab_header(title = "Multivariable Model Comparison",
+               subtitle = "Male") %>%
+    cols_align(columns = everything(), align = "left")
+
+tb = 
+  summary %>% 
+  left_join(coefs)  %>% 
+  mutate(conc_lb = concordance_mean - 1.96 * concordance_se,
+         conc_ub = concordance_mean + 1.96 * concordance_se,
+         conc_ci = paste0(sprintf("%0.3f",round(concordance_mean, 3)),
+                       " (", sprintf("%0.3f",round(conc_lb, 3)), ", ", sprintf("%0.3f",round(conc_ub, 3)), ")"),
+         hr_ci = case_when(!is.na(hr) ~ paste0(sprintf("%0.3f",round(hr, 3)),
+                       " (", sprintf("%0.3f",round(lb, 3)), ", ", sprintf("%0.3f",round(ub, 3)), ")"),
+                       TRUE ~ "---"),
+         p.value = format.pval(p.value, digits = 3)) %>% 
+  select(model_fac, hr_ci,p.value, conc_ci) %>% 
+  rename(Model = model_fac,
+         "Steps HR" = hr_ci,
+         "Steps p-value" = p.value,
+         "Model concordance" = conc_ci) %>% 
+  gt::gt() %>%
+    # gt::fmt_number(columns = starts_with("mean"), decimals = 0) %>% 
+    tab_header(title = "Multivariable Model Comparison",
+               subtitle = "Male") %>%
+    cols_align(columns = everything(), align = "left") %>% 
+  data.frame() %>%
+  kableExtra::kbl(format = "latex")
+```
+
+```{r}
+wt_female_small = 
+  sens_female %>% 
+  filter(model %in% c("Demo only", "scrf_steps+PAXMTSM", "scrf_steps", "PAXMTSM"))
+
+summary = 
+  wt_female_small %>% 
+  group_by(model) %>% 
+  summarize(across(concordance, list(mean = ~mean(.x),
+                                       se = ~sd(.x)/sqrt(n())))) %>% 
+  mutate(model_fac = factor(model, labels = c("Demographics only",
+                                              "Demographics + MIMS", 
+                                              "Demographics + Stepcount RF",
+                                              "Demographics + Stepcount RF + MIMS")))
+
+coef_scrf = 
+  df_mortality_sens %>% 
+  filter(gender == "Female") %>% 
+  mutate(
+     weight = full_sample_2_year_mec_exam_weight / 2,
+                weight_norm = weight / mean(weight)) %>% 
+  coxph(Surv(event_time, mortstat) ~ mean_scrf_steps + 
+          age_in_years_at_screening + cat_education + bin_diabetes + cat_bmi + 
+          race_hispanic_origin + chf + general_health_condition + chd + 
+          heartattack + cancer + stroke + cat_alcohol + cat_smoke + 
+          bin_mobilityproblem, weights = weight_norm, data  = .) %>% 
+  tidy() %>% 
+  select(term, estimate, std.error, robust.se, p.value) %>% 
+  filter(grepl("steps", term)) %>% 
+  mutate(hr = exp(estimate * 500), 
+         lb = exp((estimate - 1.96 * std.error) * 500),
+         ub = exp((estimate + 1.96 * std.error) * 500),
+         model = "scrf_steps")
+  
+coef_mims = 
+  df_mortality_sens %>% 
+  filter(gender == "Female") %>% 
+  mutate(
+     weight = full_sample_2_year_mec_exam_weight / 2,
+                weight_norm = weight / mean(weight)) %>% 
+  coxph(Surv(event_time, mortstat) ~ mean_PAXMTSM + mean_scrf_steps + 
+          age_in_years_at_screening + cat_education + bin_diabetes + cat_bmi + 
+          race_hispanic_origin + chf + general_health_condition + chd + 
+          heartattack + cancer + stroke + cat_alcohol + cat_smoke + 
+          bin_mobilityproblem, weights = weight_norm, data  = .) %>% 
+  tidy() %>% 
+  select(term, estimate, std.error, robust.se, p.value) %>% 
+  filter(grepl("steps", term)) %>% 
+  mutate(hr = exp(estimate * 500), 
+         lb = exp((estimate - 1.96 * std.error) * 500),
+         ub = exp((estimate + 1.96 * std.error) * 500),
+         model = "scrf_steps+PAXMTSM")
+  
+coefs = bind_rows(coef_scrf, coef_mims)
+summary %>% 
+  left_join(coefs)  %>% 
+  mutate(conc_lb = concordance_mean - 1.96 * concordance_se,
+         conc_ub = concordance_mean + 1.96 * concordance_se,
+         conc_ci = paste0(sprintf("%0.3f",round(concordance_mean, 3)),
+                       " (", sprintf("%0.3f",round(conc_lb, 3)), ", ", sprintf("%0.3f",round(conc_ub, 3)), ")"),
+         hr_ci = case_when(!is.na(hr) ~ paste0(sprintf("%0.3f",round(hr, 3)),
+                       " (", sprintf("%0.3f",round(lb, 3)), ", ", sprintf("%0.3f",round(ub, 3)), ")"),
+                       TRUE ~ "---"),
+         p.value = format.pval(p.value, digits = 3)) %>% 
+  select(model_fac, hr_ci,p.value, conc_ci) %>% 
+  rename(Model = model_fac,
+         "Steps HR" = hr_ci,
+         "Steps p-value" = p.value,
+         "Model concordance" = conc_ci) %>% 
+  gt::gt() %>%
+    # gt::fmt_number(columns = starts_with("mean"), decimals = 0) %>% 
+    tab_header(title = "Multivariable Model Comparison",
+               subtitle = "Female") %>%
+    cols_align(columns = everything(), align = "left")
+
+tb = 
+  summary %>% 
+  left_join(coefs)  %>% 
+  mutate(conc_lb = concordance_mean - 1.96 * concordance_se,
+         conc_ub = concordance_mean + 1.96 * concordance_se,
+         conc_ci = paste0(sprintf("%0.3f",round(concordance_mean, 3)),
+                       " (", sprintf("%0.3f",round(conc_lb, 3)), ", ", sprintf("%0.3f",round(conc_ub, 3)), ")"),
+         hr_ci = case_when(!is.na(hr) ~ paste0(sprintf("%0.3f",round(hr, 3)),
+                       " (", sprintf("%0.3f",round(lb, 3)), ", ", sprintf("%0.3f",round(ub, 3)), ")"),
+                       TRUE ~ "---"),
+         p.value = format.pval(p.value, digits = 3)) %>% 
+  select(model_fac, hr_ci,p.value, conc_ci) %>% 
+  rename(Model = model_fac,
+         "Steps HR" = hr_ci,
+         "Steps p-value" = p.value,
+         "Model concordance" = conc_ci) %>% 
+  gt::gt() %>%
+    # gt::fmt_number(columns = starts_with("mean"), decimals = 0) %>% 
+    tab_header(title = "Multivariable Model Comparison",
+               subtitle = "Female") %>%
+    cols_align(columns = everything(), align = "left") %>% 
+  data.frame() %>% 
+  kableExtra::kbl(format = "latex")
 ```
 
