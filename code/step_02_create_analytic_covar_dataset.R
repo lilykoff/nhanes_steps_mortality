@@ -15,7 +15,8 @@ replace_NA_cat = function(x){
 
 # first read in dataset
 temp =
-  readr::read_csv(here::here("data", "demographics", "processed", "subset_G_H_DEMO_ALQ_BMX_DIQ_MCQ_PAQ_PFQ_HSQ_HUQ_translated.csv.gz"))
+  readr::read_csv(here::here("data", "demographics", "processed", "subset_G_H_DEMO_ALQ_BMX_DIQ_MCQ_PAQ_PFQ_HSQ_HUQ_translated.csv.gz"),
+                  col_types = cols('Respondent sequence number' = col_character()))
 # readr::read_csv(here::here("lily", "data", "subset_G_H_DEMO_ALQ_BMX_DIQ_MCQ_PAQ_PFQ_translated.csv.gz"))
 
 # general health condition x is from HSD

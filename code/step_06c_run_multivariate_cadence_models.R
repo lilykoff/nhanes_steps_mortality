@@ -16,14 +16,14 @@ df_mortality =
                           race_hispanic_origin, cat_education,
                           cat_bmi, chd, chf, heartattack, stroke, cancer,
                           bin_diabetes, cat_alcohol, cat_smoke, bin_mobilityproblem,
-                          general_health_condition, mortstat, permth_exm, mean_PAXMTSM),
+                          general_health_condition, mortstat, permth_exm, total_PAXMTSM),
                 ~!is.na(.x))) %>% # no missing data
   mutate(event_time = permth_exm / 12) # event time in years = person months since exam / 12
 
 df_mortality_win =
   df_mortality %>%
   ungroup() %>%
-  mutate(across(c(contains("mean"), contains("peak")), ~DescTools::Winsorize(.x, probs = c(0, 0.99))))
+  mutate(across(c(contains("total"), contains("peak")), ~DescTools::Winsorize(.x, quantile(.x, probs = c(0, 0.99)))))
 
 
 survival_metrics = metric_set(concordance_survival)
@@ -36,7 +36,7 @@ survreg_spec = proportional_hazards() %>%
 # create four workflows: demo only, demo + MIMS, demo + steps, demo + MIMS + steps
 # for each model, add case weights
 
-demo_vars = c("age_in_years_at_screening", "cat_bmi",
+demo_vars = c("age_in_years_at_screening", "cat_bmi","gender",
               "race_hispanic_origin", "bin_diabetes", "chf", "general_health_condition",
               "chd", "heartattack", "cancer", "stroke", "cat_alcohol", "cat_smoke",
               "bin_mobilityproblem", "cat_education")
@@ -75,13 +75,13 @@ fit_model = function(pred_vars, model_name, folds, spec, metrics, mort_df){
 
 
 add_vars_list = as.list(c(df_mortality_win %>%
-                            select(contains("mean") | contains("peak")) %>% colnames()))
-step_vars = df_mortality_win %>% select(contains("steps") & contains("mean")) %>% colnames()
+                            select(contains("total") | contains("peak")) %>% colnames()))
+step_vars = df_mortality_win %>% select(contains("steps") & contains("total")) %>% colnames()
 peak1_vars = df_mortality_win %>% select(contains("steps") & contains("peak1")) %>% colnames()
 peak30_vars = df_mortality_win %>% select(contains("steps") & contains("peak30")) %>% colnames()
 
-step_peak_list = lapply(peak1_vars, function(x){c(x, "mean_PAXMTSM")})
-step_peak30_list = lapply(peak30_vars, function(x){c(x, "mean_PAXMTSM")})
+step_peak_list = lapply(peak1_vars, function(x){c(x, "total_PAXMTSM")})
+step_peak30_list = lapply(peak30_vars, function(x){c(x, "total_PAXMTSM")})
 
 together = list(c(step_vars[1], peak1_vars[1]),
                 c(step_vars[2], peak1_vars[2]),
@@ -105,22 +105,20 @@ all_list = c(add_vars_list, step_peak_list, step_peak30_list, together, together
 preds_list = lapply(all_list, function(x){c(x, demo_vars)})
 preds_list[[length(preds_list) + 1]] = demo_vars
 model_names =
-  map(all_list, .f = function(x){paste(sub(".*mean\\_", "", x), collapse = "+")})
+  map(all_list, .f = function(x){paste(sub(".*total\\_", "", x), collapse = "+")})
 model_names[[length(model_names) + 1]] = "Demo only"
 
-
-female_df = df_mortality_win %>%
-  filter(gender == "Female") %>%
+df = df_mortality_win %>%
   mutate(weight = full_sample_2_year_mec_exam_weight / 2, weight_norm = weight / mean(weight))
 # create a survival object
-surv_female =
-  female_df %>%
+surv_df =
+  df %>%
   mutate(mort_surv = Surv(event_time, mortstat)) %>%
   mutate(case_weights_imp = hardhat::importance_weights(weight_norm)) %>%
   mutate(row_ind = row_number())
 set.seed(4575)
-folds_female = vfold_cv(surv_female, v = 10, repeats = 100)
-fname = "metrics_wtd_100_female_cadence.rds"
+folds = vfold_cv(surv_df, v = 10, repeats = 100)
+fname = "metrics_wtd_100_cadence.rds"
 
 
 plan(multisession, workers = ncores)
@@ -131,43 +129,74 @@ results =
     .f = fit_model,
     spec = survreg_spec,
     metrics = survival_metrics,
-    folds = folds_female,
-    mort_df = surv_female,
+    folds = folds,
+    mort_df = surv_df,
     .options = furrr_options(seed = TRUE, globals = TRUE)
   )
-
 saveRDS(
   results,
   here::here("results", fname)
 )
 
-
-male_df = df_mortality_win %>%
-  filter(gender == "Male") %>%
-  mutate(weight = full_sample_2_year_mec_exam_weight / 2, weight_norm = weight / mean(weight))
-# create a survival object
-surv_male =
-  male_df %>%
-  mutate(mort_surv = Surv(event_time, mortstat)) %>%
-  mutate(case_weights_imp = hardhat::importance_weights(weight_norm)) %>%
-  mutate(row_ind = row_number())
-set.seed(4575)
-folds_male = vfold_cv(surv_male, v = 10, repeats = 100)
-fname = "metrics_wtd_100_male_cadence.rds"
-
-results =
-  furrr::future_map2_dfr(
-    .x = preds_list,
-    .y = model_names,
-    .f = fit_model,
-    spec = survreg_spec,
-    metrics = survival_metrics,
-    folds = folds_male,
-    mort_df = surv_male,
-    .options = furrr_options(seed = TRUE, globals = TRUE)
-  )
-
-saveRDS(
-  results,
-  here::here("results", fname)
-)
+# female_df = df_mortality_win %>%
+#   filter(gender == "Female") %>%
+#   mutate(weight = full_sample_2_year_mec_exam_weight / 2, weight_norm = weight / mean(weight))
+# # create a survival object
+# surv_female =
+#   female_df %>%
+#   mutate(mort_surv = Surv(event_time, mortstat)) %>%
+#   mutate(case_weights_imp = hardhat::importance_weights(weight_norm)) %>%
+#   mutate(row_ind = row_number())
+# set.seed(4575)
+# folds_female = vfold_cv(surv_female, v = 10, repeats = 100)
+# fname = "metrics_wtd_100_female_cadence.rds"
+#
+#
+# plan(multisession, workers = ncores)
+# results =
+#   furrr::future_map2_dfr(
+#     .x = preds_list,
+#     .y = model_names,
+#     .f = fit_model,
+#     spec = survreg_spec,
+#     metrics = survival_metrics,
+#     folds = folds_female,
+#     mort_df = surv_female,
+#     .options = furrr_options(seed = TRUE, globals = TRUE)
+#   )
+#
+# saveRDS(
+#   results,
+#   here::here("results", fname)
+# )
+#
+#
+# male_df = df_mortality_win %>%
+#   filter(gender == "Male") %>%
+#   mutate(weight = full_sample_2_year_mec_exam_weight / 2, weight_norm = weight / mean(weight))
+# # create a survival object
+# surv_male =
+#   male_df %>%
+#   mutate(mort_surv = Surv(event_time, mortstat)) %>%
+#   mutate(case_weights_imp = hardhat::importance_weights(weight_norm)) %>%
+#   mutate(row_ind = row_number())
+# set.seed(4575)
+# folds_male = vfold_cv(surv_male, v = 10, repeats = 100)
+# fname = "metrics_wtd_100_male_cadence.rds"
+#
+# results =
+#   furrr::future_map2_dfr(
+#     .x = preds_list,
+#     .y = model_names,
+#     .f = fit_model,
+#     spec = survreg_spec,
+#     metrics = survival_metrics,
+#     folds = folds_male,
+#     mort_df = surv_male,
+#     .options = furrr_options(seed = TRUE, globals = TRUE)
+#   )
+#
+# saveRDS(
+#   results,
+#   here::here("results", fname)
+# )

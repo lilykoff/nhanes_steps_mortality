@@ -2,146 +2,72 @@
 library(tidyverse)
 library(data.table)
 library(gtsummary)
-wt_file = readr::read_csv(here::here("data", "accelerometry", "inclusion_summary.csv.gz"))
+library(furrr)
+
+n_cores = parallel::detectCores() - 1
+wt_file = readr::read_csv(here::here("data", "accelerometry", "inclusion_summary.csv.gz"),
+                          col_types = cols(SEQN = col_character(),
+                                           PAXDAYM = col_integer()))
+valid_days =
+  wt_file %>%
+  filter(include) %>%
+  select(SEQN, PAXDAYM, W, S, U, N, flag, non_flag_wear, MIMS_0)
+
 # pa_df = readr::read_csv(here::here("data", "accelerometry", "nhanes_minute_level_pa.csv.gz"))
 
-if(!file.exists(here::here("data", "accelerometry", "pa_df_day_level.rds"))){
-  pa_df = readRDS(here::here("data", "accelerometry", "nhanes_minute_level_pa.rds"))
+pa_files = list.files(here::here("data", "accelerometry", "minute_level"), pattern = ".*nhanes\\_1440.*rds")
+pa_files = pa_files[!grepl("all", pa_files) & !grepl("PAXFLGSM", pa_files) & !grepl("PAXPREDM", pa_files)]
 
-  pa_dt = as.data.table(pa_df)
+pa_vars = sub(".*nhanes\\_1440\\_(.+).rds.*", "\\1", pa_files)
 
-  # Perform calculations
-  pa_dt_sums <- pa_dt[
-    variable != "PAXPREDM" & variable != "PAXFLGSM_BIN",
-    .(
-      SEQN,
-      PAXDAYM, PAXDAYWM, # Include the 'SEQN' column in the result
-      variable,   # Include the 'variable' column in the result
-      total = rowSums(.SD, na.rm = TRUE),
-      peak1 = apply(.SD, 1, max, na.rm = TRUE),
-      mean_top_30 = apply(.SD, 1, function(row) {
-        top_30_values <- sort(row, decreasing = TRUE)[1:30]
-        mean(top_30_values, na.rm = TRUE)
-      })
+get_day_summaries = function(variable){
+  fpath = file.path(here::here("data", "accelerometry", "minute_level"), paste0("nhanes_1440_", variable, ".rds"))
+
+  x = readRDS(fpath) %>% as.data.table()
+  x_filt = x %>%
+    right_join(valid_days %>% select(SEQN, PAXDAYM), by = c("SEQN", "PAXDAYM"))
+  rm(x)
+  x_day = x_filt[
+    , .(SEQN, PAXDAYM, PAXDAYWM,
+        total = rowSums(.SD, na.rm = TRUE), # get daily sum
+        peak1 = apply(.SD, 1, max, na.rm = TRUE), # get daily peak
+        peak30 = apply(.SD, 1, function(row) {
+          top_30_values = sort(row, decreasing = TRUE)[1:30]
+          mean(top_30_values, na.rm = TRUE) # get mean of top 30 values
+        })
     ),
-    .SDcols = patterns("^min_")
+    .SDcols = patterns("^min_") # select all columns that start with min_
   ]
+  rm(x_filt)
 
-  valid_days =
-    wt_file %>%
-    filter(include) %>%
-    select(SEQN, PAXDAYM)
-
-  pa_df_valid = pa_dt_sums %>%
-    right_join(valid_days, by = c("SEQN", "PAXDAYM")) %>%
-    group_by(SEQN, variable) %>%
-    summarize(mean = mean(total, na.rm = TRUE),
-              peak1 = mean(peak1, na.rm = TRUE),
-              peak30 = mean(mean_top_30, na.rm = TRUE),
-              num_valid_days = n()) %>%
-    pivot_wider(names_from = variable, values_from = c(mean, peak1, peak30)) %>%
-    ungroup()
-
-  saveRDS(pa_df_valid, here::here("data", "accelerometry", "pa_df_subject_level.rds"))
-
-  # day level data
-  pa_df_all =
-    pa_dt_sums %>%
-    left_join(wt_file %>% select(SEQN, PAXDAYM, W, S, U, N, flag, non_flag_wear, MIMS_0, include), by = c("SEQN", "PAXDAYM"))
-
-  pa_df_all =
-    pa_df_all %>%
-    rename(mean = total,
-           peak30 = mean_top_30,
-           wear_min = W,
-           sleep_min = S,
-           unknown_min = U,
-           nonwear_min = N,
-           flagged_min = flag,
-           non_flagged_wear_min = non_flag_wear,
-           zero_MIMS_min = MIMS_0,
-           include_day = include) %>%
-    pivot_wider(names_from = variable, values_from = c(mean, peak1, peak30))
-  saveRDS(pa_df_all, here::here("data", "accelerometry", "pa_df_day_level.rds"))
+  x_day =
+    x_day %>%
+    rename_with(.cols = c(contains("total"), contains("peak")),
+                .fn = ~paste0(.x, "_", variable))
+  x_day
 
 }
+plan(multisession, workers = n_cores)
+day_summaries = furrr::future_map(.x  = pa_vars, .f = get_day_summaries, .progress = TRUE)
+# if don't want to parallelize, can run
+# day_summaries = map(.x  = pa_vars, .f = get_day_summaries, .progress = TRUE)
 
-day_key = wt_file %>%
+all_measures = day_summaries %>%
+  reduce(left_join, by = c("SEQN", "PAXDAYM", "PAXDAYWM")) %>%
+  left_join(wt_file %>% select(SEQN, PAXDAYM, W, S, U, N, flag, non_flag_wear, MIMS_0), by = c("SEQN", "PAXDAYM")) %>%
+  rename(wear_min = W,
+         sleep_min = S,
+         unknown_min = U,
+         nonwear_min = N,
+         flagged_min = flag,
+         non_flagged_wear_min = non_flag_wear,
+         zero_MIMS_min = MIMS_0)
+
+subject_summaries =
+  all_measures %>%
   group_by(SEQN) %>%
-  summarize(num_valid_days = sum(include))
+  summarize(num_valid_days = n(),
+            across(c(contains("peak"), contains("total")), ~mean(.x, na.rm = TRUE)))
 
-pa_df = readRDS(here::here("data", "accelerometry", "pa_df_subject_level.rds"))
-
-covariates = readRDS(here::here("data", "demographics", "processed", "covariates_mortality_G_H_tidy.rds"))
-
-covariates =
-  covariates %>%
-  left_join(pa_df, by = "SEQN") %>%
-  select(-num_valid_days) %>%
-  left_join(day_key, by = "SEQN") %>%
-  mutate(has_accel = SEQN %in% wt_file$SEQN,
-         valid_accel = case_when(is.na(num_valid_days) ~ FALSE,
-                                       num_valid_days >= 3 ~ TRUE,
-                                       num_valid_days < 3 ~ FALSE),
-      inclusion_type = factor(case_when(
-    num_valid_days >= 3 ~ ">= 3 valid days",
-    num_valid_days == 0 ~ "No valid days",
-    num_valid_days < 3 ~ "< 3 valid days",
-    TRUE ~ "Didn't receive device"
-    )),
-  across(c(contains("scrf"), contains("adept")), ~if_else(is.na(.x) & valid_accel, 0, .x)),
-  cat_education =
-    factor(case_when(
-      education_level_adults_20 == "High school graduate/GED or equi" ~ "HS/HS equivalent",
-      education_level_adults_20 %in% c("Less than 9th grade", "9-11th grade (Includes 12th grad") ~ "Less than HS",
-      is.na(education_level_adults_20) ~ NA_character_,
-      TRUE ~ "More than HS"))) %>%
-  mutate(across(c(cat_education, race_hispanic_origin, cat_smoke), ~forcats::fct_infreq(.x))) %>%
-  mutate(general_health_condition = forcats::fct_relevel(general_health_condition, c("Poor", "Fair", "Good", "Very good", "Excellent")),
-         cat_alcohol = forcats::fct_relevel(cat_alcohol, c("Never drinker", "Former drinker", "Moderate drinker", "Heavy drinker", "Missing alcohol")))
-
-saveRDS(covariates, here::here("data", "covariates_accel_mortality_df.rds"))
-
-
-# make table of exclusion by accelerometer
-covariates %>%
-  select(
-    gender,
-    age_in_years_at_screening,
-    race_hispanic_origin,
-    education_level_adults_20,
-    cat_bmi,
-    bin_diabetes,
-    chf,
-    chd,
-    stroke,
-    cat_alcohol,
-    cat_smoke,
-    bin_mobilityproblem,
-    general_health_condition,
-    valid_accel,
-    mortstat,
-    data_release_cycle
-  ) %>%
-  mutate(across(
-    c(bin_diabetes, chf, chd, stroke, bin_mobilityproblem, mortstat),
-    ~ .x == 1
-  )) %>%
-  tbl_strata(
-    strata = data_release_cycle,
-    ~ tbl_summary(
-      .x,
-      by = valid_accel,
-      statistic = list(
-        all_continuous() ~ "{mean} ({sd})",
-        all_categorical() ~ "{n} ({p}%)"
-      ),
-      digits = all_continuous() ~ 2,
-      # label = grade ~ "Tumor Grade",
-      missing_text = "(Missing)"
-    ) %>%
-      add_overall()
-  )
-
-
-
+saveRDS(subject_summaries, here::here("data", "accelerometry", "summarized", "pa_df_subject_level.rds"))
+saveRDS(all_measures, here::here("data", "accelerometry", "summarized", "pa_df_day_level.rds"))

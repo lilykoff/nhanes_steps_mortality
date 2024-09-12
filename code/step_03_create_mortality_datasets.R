@@ -5,6 +5,11 @@ library(dplyr)
 # download data HERE
 # https://ftp.cdc.gov/pub/Health_Statistics/NCHS/datalinkage/linked_mortality/NHANES_2011_2012_MORT_2019_PUBLIC.dat
 
+
+fpath_g = here::here("data", "demographics", "raw", "NHANES_2011_2012_MORT_2019_PUBLIC.dat")  # full .DAT name here
+fpath_h = here::here("data", "demographics", "raw", "NHANES_2013_2014_MORT_2019_PUBLIC.dat")  # full .DAT name here
+
+
 download_mort_dats = function(url){
   dest = here::here("data", "demographics", "raw", sub(".*\\/", "", url))
   curl::curl_download(url, destfile = dest, quiet = FALSE)
@@ -12,16 +17,14 @@ download_mort_dats = function(url){
 urls = c("https://ftp.cdc.gov/pub/Health_Statistics/NCHS/datalinkage/linked_mortality/NHANES_2011_2012_MORT_2019_PUBLIC.dat",
          "https://ftp.cdc.gov/pub/Health_Statistics/NCHS/datalinkage/linked_mortality/NHANES_2013_2014_MORT_2019_PUBLIC.dat")
 
-lapply(urls, download_mort_dats)
-
-
-fpath_g = here::here("data", "demographics", "raw", "NHANES_2011_2012_MORT_2019_PUBLIC.dat")  # full .DAT name here
-fpath_h = here::here("data", "demographics", "raw", "NHANES_2013_2014_MORT_2019_PUBLIC.dat")  # full .DAT name here
+if(!all(file.exists(c(fpath_g, fpath_h)))){
+  lapply(urls, download_mort_dats)
+}
 
 
 # read in the fixed-width format ASCII file
 mort_g <- read_fwf(file=fpath_g,
-                col_types = "iiiiiiii",
+                col_types = "ciiiiiii",
                 fwf_cols(seqn = c(1,6),
                          eligstat = c(15,15),
                          mortstat = c(16,16),
@@ -35,7 +38,7 @@ mort_g <- read_fwf(file=fpath_g,
 )
 
 mort_h <- read_fwf(file=fpath_h,
-                  col_types = "iiiiiiii",
+                  col_types = "ciiiiiii",
                   fwf_cols(seqn = c(1,6),
                            eligstat = c(15,15),
                            mortstat = c(16,16),
