@@ -11,7 +11,7 @@ col1 = "#CC5151"; col2 = "#422CB2" # from paletteer_d("colorBlindness::SteppedSe
 # paletteer_d("ggthemes::colorblind") # for colorblind friendly palette
 col_vec = c("#000000FF", "#009E73FF", "#CC79A7FF", "#E69F00FF", "#D55E00FF", "#56B4E9FF", "#0072B2FF")
 
-
+# change to  % diff after smoothing
 wt_single = readRDS(here::here("results", "metrics_wtd_100_singlevar.rds")) %>%
   group_by(variable) %>%
   mutate(ind = row_number(),
@@ -59,7 +59,7 @@ df_accel_win =
 
 
 # supplemental figure: distributions
-df_accel %>%
+p1 = df_accel %>%
   select(contains("steps") & contains("total"), SEQN) %>%
   pivot_longer(cols = -c(SEQN)) %>%
   mutate(type = "Raw") %>%
@@ -76,10 +76,10 @@ df_accel %>%
   scale_color_manual(values = c(col1, col2))+
   theme(legend.position = "none",
         panel.grid.minor.x = element_blank(),
-        axis.title = element_text(size = 14)) +
-  labs(x = "Mean Daily Steps x 1000", y = "Density", title = "Distribution of Mean Daily Step Counts",
-       subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
-
+        axis.title = element_text(size = 15),
+        title = element_text(size = 16)) +
+  labs(x = "Mean Daily Steps x 1000", y = "Density", title = "Distribution of Mean Daily Step Counts")
+p1
 if(save) {
   ggsave(
     here::here("manuscript", "figures", "step_distributions.png"),
@@ -89,7 +89,7 @@ if(save) {
   )
 }
 
-df_accel %>%
+p2 = df_accel %>%
   select(!contains("steps") & contains("total"), SEQN) %>%
   pivot_longer(cols = -c(SEQN)) %>%
   mutate(type = "Raw") %>%
@@ -106,13 +106,25 @@ df_accel %>%
   scale_color_manual(values = c(col1, col2))+
   theme(legend.position = "none",
         panel.grid.minor.x = element_blank(),
-        axis.title = element_text(size = 14)) +
-  labs(x = "Mean Daily Value x 1000", y = "Density", title = "Distribution of Mean PA",
-       subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
+        axis.title = element_text(size = 15),
+        title = element_text(size = 16)) +
+  labs(x = "Mean Daily Value x 1000", y = "Density", title = "Distribution of Mean PA")
 
+p2
 if(save) {
   ggsave(
     here::here("manuscript", "figures", "pa_distributions.png"),
+    dpi = 400,
+    width = 10,
+    height = 8
+  )
+}
+
+p1 / p2 + plot_annotation(tag_levels = 'A')
+
+if(save) {
+  ggsave(
+    here::here("manuscript", "figures", "distributions_all.png"),
     dpi = 400,
     width = 10,
     height = 8
@@ -177,6 +189,13 @@ results = models %>%
   dplyr::select(-m, -l, -u) %>%
   tidyr::unnest(cols = c(data, contains("fitted")))
 
+
+# get some means for the text of the manuscript
+results %>%
+  filter(age_in_years_at_screening %in% c(40, 79) & grepl("step", metric) & !grepl("peak", metric)) %>%
+  select(metric, mean, fitted_mean, age = age_in_years_at_screening) %>%
+  pivot_wider(names_from = age, values_from = c(mean, fitted_mean))
+
 # name color vector as desired
 names(col_vec) = c("Actilife", "ADEPT", "Oak", "Stepcount RF","Stepcount SSL", "Verisense", "Verisense rev.")
 # panel A
@@ -201,12 +220,13 @@ p1 = results %>%
   theme_light() +
   scale_color_manual(values = col_vec, name = "Algorithm") +
   geom_hline(aes(yintercept = 10), col = "darkgrey", linetype = "dashed") +
-  theme(legend.position = "bottom",
+  theme(legend.position = "none",
         legend.title = element_blank(),
+        text =element_text(size = 14),
         strip.text = element_text(size = 12),
         panel.grid.minor = element_blank()) +
   labs(x = "Age (years)", y = "Mean Daily Steps x 1000",
-       title = "Smoothed Survey Weighted Mean Daily Steps by Age ")+
+       title = "Smoothed survey weighted mean daily steps by age ")+
   scale_y_continuous(breaks=seq(0,16,1))+
   scale_x_continuous(breaks=seq(20,80,10))
 
@@ -258,7 +278,7 @@ p3 = means_df %>%
                          labels = c("Actilife", "ADEPT", "Oak", "Stepcount RF", "Stepcount SSL",
                                     "Verisense", "Verisense rev."))) %>%
   group_by(metric) %>%
-  mutate(pct_chg = (mean - lag(mean))/lag(mean)*100) %>%
+  mutate(pct_chg = (mean - dplyr::lag(mean))/dplyr::lag(mean)*100) %>%
   ggplot(aes(x = age_in_years_at_screening, y = pct_chg, color = metric))+
   geom_smooth(method = "loess", se = FALSE) +
   # geom_line() +
@@ -271,10 +291,62 @@ p3 = means_df %>%
   scale_x_continuous(breaks=seq(20,80,10))+
   scale_y_continuous(breaks=seq(-5, 5, 1))
 
+label_df =
+  results %>%
+  filter(grepl("step", metric) & grepl("total", metric)) %>%
+  mutate(metric = factor(metric, levels = c("total_actisteps",
+                                            "total_adeptsteps",
+                                            "total_oaksteps",
+                                            "total_scrfsteps",
+                                            "total_scsslsteps",
+                                            "total_vssteps",
+                                            "total_vsrevsteps"),
+                         labels = c("Actilife", "ADEPT", "Oak", "Stepcount RF", "Stepcount SSL",
+                                    "Verisense", "Verisense rev."))) %>%
+  group_by(metric) %>%
+  mutate(pct_chg = (fitted_mean - dplyr::lag(fitted_mean))/dplyr::lag(fitted_mean)*100)  %>%
+  filter(age_in_years_at_screening == 79)
+p3 = results %>%
+  filter(grepl("step", metric) & grepl("total", metric)) %>%
+  mutate(metric = factor(metric, levels = c("total_actisteps",
+                                            "total_adeptsteps",
+                                            "total_oaksteps",
+                                            "total_scrfsteps",
+                                            "total_scsslsteps",
+                                            "total_vssteps",
+                                            "total_vsrevsteps"),
+                         labels = c("Actilife", "ADEPT", "Oak", "Stepcount RF", "Stepcount SSL",
+                                    "Verisense", "Verisense rev."))) %>%
+  group_by(metric) %>%
+  mutate(pct_chg = (fitted_mean - dplyr::lag(fitted_mean))/dplyr::lag(fitted_mean)*100) %>%
+  ggplot(aes(x = age_in_years_at_screening, y = pct_chg, color = metric, fill = metric))+
+  geom_line(linewidth = 1) +
+  geom_ribbon(alpha = .2, linetype = 0, aes(ymax = 0, ymin = 0)) +
+  scale_fill_manual(values = col_vec, name = "Algorithm") +
+  theme_light() +
+  scale_color_manual(values = col_vec, name = "Algorithm") +
+  geom_hline(aes(yintercept = 0), col = "darkgrey", linetype = "dashed", linewidth = 1.1) +
+  theme_light() +
+  labs(x = "Age (years)", y = "% change from previous year",
+       title = "Survey weighted estimated per-year difference in mean daily steps")+
+  theme(legend.position = c(0.4, 0.4),
+        legend.title = element_blank(),
+        text = element_text(size = 14))+
+  scale_x_continuous(breaks=seq(20,80,10))+
+  ggrepel::geom_text_repel(data = label_df, aes(label = metric, x = 79, y = pct_chg), size = 4, nudge_x = 1,
+                            inherit.aes = FALSE, box.padding = 0.125, point.padding = 0.125, segment.color = "grey50",
+                            max.overlaps = Inf)+
+  guides(color = guide_legend(nrow = 2),
+         fill = guide_legend(nrow = 2))
+
+# export 900x500
+  # scale_y_continuous(limits = c(-6, 5), breaks=seq(-5, 5, 1))
+
 p3
 
 
 p1 / (p2 + p3 ) + plot_layout(guides = "collect", nrow = 2, axis_titles = "collect") + plot_annotation(tag_levels = 'A') & theme(legend.position = 'bottom')
+p1 /  p3  + plot_layout(guides = "collect", nrow = 2, axis_titles = "collect") + plot_annotation(tag_levels = 'A') & theme(legend.position = 'bottom')
 
 if(save) {
   ggsave(
@@ -350,6 +422,22 @@ cor_mat =
   ) %>%
   cor(., use = "complete", method = "spearman")
 
+cor_mat_pearson =
+  df_accel %>% select(contains("total")) %>%
+  select(
+    contains("acti"),
+    contains("adept"),
+    contains("oak"),
+    contains("sc"),
+    contains("vss"),
+    contains("vsr"),
+    total_AC,
+    total_PAXMTSM,
+    total_log10AC,
+    total_log10PAXMTSM
+  ) %>%
+  cor(., use = "complete", method = "pearson")
+
 # correlation p value matrix
 pvals = df_accel %>% select(contains("total")) %>%
   select(
@@ -369,7 +457,8 @@ pvals = df_accel %>% select(contains("total")) %>%
   as.matrix()
 
 
-colnames(cor_mat) = rownames(cor_mat) = colnames(pvals) = rownames(pvals) = c(
+colnames(cor_mat) = rownames(cor_mat)  = colnames(cor_mat_pearson) =
+  rownames(cor_mat_pearson) = colnames(pvals) = rownames(pvals) = c(
   "Actilife steps",
   "ADEPT",
   "Oak",
@@ -404,6 +493,30 @@ corrplot::corrplot(
   addCoef.col = 'grey50'
 ) %>%
   corrplot::corrRect(namesMat  = r)
+
+# r = c("Actilife steps", "ADEPT", "Verisense", "Verisense rev.")
+
+
+corrplot::corrplot(
+  cor_mat_pearson,
+  method = "color",
+  type = "upper",
+  col = paletteer_d("colorBlindness::Blue2Orange8Steps"),
+  tl.col = "black",
+  tl.srt = 30,
+  p.mat = pvals,
+  col.lim = c(0.2, 1),
+  sig.level = 0.05,
+  insig = "blank",
+  is.corr = FALSE,
+  addgrid.col = "white",
+  diag = FALSE,
+  title = "Pearson Correlations",
+  addCoef.col = 'grey50'
+) %>%
+  corrplot::corrRect(namesMat  = r)
+
+
 
 # difference matrix
 diff_mat =
@@ -519,6 +632,92 @@ corrplot::corrplot(
 )
 
 
+vars = df_accel %>%
+  select(contains("total") & contains("steps")) %>%
+  colnames()
+vnames = c(
+  "Actilife steps",
+  "ADEPT",
+  "Oak",
+  "Stepcount RF",
+  "Stepcount SSL",
+  "Verisense rev.",
+  "Verisense"
+)
+
+plotlist = list()
+for(var1 in vars){
+  for(var2 in vars){
+    if(var1 != var2 & which(vars==var1) < which(vars==var2)){
+      vname1 = vnames[which(vars==var1)]; vname2 = vnames[which(vars==var2)]
+      p = df_accel %>%
+        select(age_in_years_at_screening, var1 = all_of(var1), var2 = all_of(var2)) %>%
+        rowwise() %>%
+        mutate(diff = (var1 - var2)/1000,
+               mean = (mean(c(var1, var2)))/1000) %>%
+        ggplot(aes(x = mean, y = diff, col = age_in_years_at_screening))+
+        geom_point(size = .5) +
+        scale_color_viridis_c(name = "Age", option = "C") +
+        geom_hline(aes(yintercept = 0), col = "grey50") +
+        theme_classic() +
+        theme(legend.position = "none",
+              axis.title = element_blank(),
+              axis.text = element_text(size = 12))+
+        labs(x = paste0("Mean of ", vname1, " and ", vname2, " (x1000)"),
+             y = paste0(vname1, " minus ", vname2, " (x1000)"))
+      plotlist[[length(plotlist)+1]] = p
+    }
+  }
+}
+
+p = df_accel %>%
+  select(age_in_years_at_screening, var1 = all_of(var1), var2 = all_of(var2)) %>%
+  rowwise() %>%
+  mutate(diff = (var1 - var2)/1000,
+         mean = (mean(c(var1, var2)))/1000) %>%
+  ggplot(aes(x = mean, y = diff, col = age_in_years_at_screening))+
+  geom_point(size = .5) +
+  scale_color_viridis_c(name = "Age", option = "C") +
+  geom_hline(aes(yintercept = 0), col = "grey50") +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        axis.title = element_blank(),
+        axis.text = element_text(size = 12))+
+  labs(x = paste0("Mean of ", vname1, " and ", vname2, " (x1000)"),
+       y = paste0(vname1, " minus ", vname2, " (x1000)"))
+
+layout <- '
+A#####
+BG####
+CHL###
+DIMP##
+EJNQS#
+FKORTU
+'
+wrap_plots(plotlist[[1]], plotlist[[2]], plotlist[[3]],
+           plotlist[[4]] , plotlist[[5]] , plotlist[[6]],
+  plotlist[[7]] , plotlist[[8]] , plotlist[[9]] , plotlist[[10]] , plotlist[[11]]  ,
+  plotlist[[12]], plotlist[[13]] , plotlist[[14]] , plotlist[[15]]  ,
+  plotlist[[16]] , plotlist[[17]] , plotlist[[18]]  ,
+ plotlist[[19]] , plotlist[[20]], plotlist[[21]]) + plot_layout(design = layout)
+
+if (save) {
+  ggsave(
+    here::here("manuscript", "figures", "bland_altman.png"),
+    dpi = 400,
+    width = 14,
+    height = 14
+  )
+}
+
+df_accel %>%
+  rowwise() %>%
+  mutate(diff = total_scrfsteps - total_vssteps,
+         mean = mean(c(total_scrfsteps, total_vssteps))) %>%
+  ggplot(aes(x = mean, y = diff, col = age_in_years_at_screening))+
+  geom_point() +
+  scale_color_viridis_c() +
+  geom_hline(aes(yintercept = 0))
 ### concordance figure, single variable
 # var labels df
 var_labels =
@@ -559,12 +758,13 @@ wt_single %>%
   left_join(var_labels, by = c("variable" = "names")) %>%
   mutate(labels = factor(labels),
          labels = fct_reorder(labels, mean)) %>%
-  ggplot(aes(y = labels, x = mean, xmin = ci_low, xmax = ci_high, color = var_group))+
-  geom_point(size = 1.3) +
+  ggplot(aes(y = labels, x = mean, xmin = ci_low, xmax = ci_high, color = var_group, shape = var_group))+
+  geom_point(size = 3) +
   # geom_errorbarh(height = .3) +
   theme_bw() +
   # scale_color_manual(values = c("#CC79A7FF", "#009E73FF", "#0072B2FF"), name = "")+
   scale_color_manual(values = c("#FF6DB6", "#009292", "#006DDB"), name = "")+ # colors from paletteer_d("colorBlindness::paletteMartin")
+  scale_shape_manual(values = c(8, 17, 16), name = "")+
   scale_x_continuous(limits=c(0.5, 0.75), breaks=seq(0.5, 0.75, .05))+
   theme(legend.position = c(.3, .75),
         legend.title = element_blank(),

@@ -1,0 +1,1078 @@
+---
+title: "Accelerometry Weartime Vignette"
+format:
+  html:
+    toc: true
+    toc-location: left
+    embed-resources: true
+    code-background: true
+    code-tools: true
+    code-fold: true
+    code-block-border-left: true
+    theme: flatly
+execute:
+  echo: true
+  cache: true
+  message: false
+  warning: false
+editor: source
+---
+
+# Background
+
+When analyzing accelerometry data collected in free living settings, weartime estimation is a crucial first step. If an individual isn't actually wearing her device, we don't want to estimate her physical activity as zero! In analyses of free-living accelerometry data, researchers typically define a weartime criteria and exclude individuals who do not meet that criteria. However, there is little consensus on weartime-based exclusion criteria, and the choice of criteria will impact the estimation of physical activity.[^1] In addition to widespread differences in exclusion criteria, there are many different methods to estimate wear from accelerometry data.
+
+[^1]: https://pubmed.ncbi.nlm.nih.gov/22936409/, https://pubmed.ncbi.nlm.nih.gov/23036822/
+
+# Weartime in NHANES 2011-2014
+
+In the [NHANES 2011-2014](https://wwwn.cdc.gov/nchs/nhanes/ContinuousNhanes/Default.aspx?BeginYear=2011%5D) data, weartime estimation was performed on the raw data using a machine learning algorithm.[^2]
+
+[^2]: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9615811/
+
+More details of the algorithm are available in the [NHANES documentation](https://wwwn.cdc.gov/Nchs/Nhanes/2013-2014/PAXMIN_H.htm#Analytic_Notes).
+
+::: {.callout-note collapse="true"}
+## Expand to see more details about the algorithm
+
+"An open-source algorithm was used with the 80 Hz accelerometer data to predict time periods of wake wear, sleep wear, or non-wear data, and assign a confidence value ranging from 0.0 to 1.0 to indicate the algorithm's confidence that the time periods are wake wear, sleep wear or non-wear. In most cases, the algorithm identified a category for each minute. Sometimes, the algorithm was uncertain how to categorize a period of time. This resulted in unknown time periods. This algorithm used three steps."
+
+Step one:
+
+-   1.5 minute periods of raw data are extracted
+
+-   ML used to predict whether each 30-second chunk is wake, sleep, or nonwear
+
+Step two:
+
+-   Minimum durations (wake \< 3 min, sleep \< 10 min, and nonwear \< 10 min) are compared to adjacent periods
+
+-   Changed if adjacent periods have much higher confidence values than the middle period
+
+Step three:
+
+-   Longer periods considered to account for changes in body orientation during sleep
+:::
+
+In the `PAXPREDM` column of the `PAXMIN` files, each minute of the day for each individual is assigned a wear prediction:
+
+-   1: wake wear
+-   2: sleep wear
+-   3: nonwear
+-   4: unknown
+
+The purpose of this document is to explore the distribution of these wear predictions and dive deeper into the data for individuals with high amounts of wake, sleep, nonwear, and unknown predictions.
+
+```{r load data and packages }
+library(tidyverse)
+library(paletteer)
+library(ggridges)
+library(ggplot2)
+library(lubridate)
+library(scales)
+library(htmlwidgets)
+library(htmltools)
+
+# demographics data 
+demo = readRDS(here::here("vignettes", "vignette_data", "covariates_mortality_G_H_tidy.rds"))
+
+wear = readr::read_csv(here::here("vignettes", "vignette_data", "weartime_summaries.csv.gz"))
+
+
+# just get a few variables we need 
+demo_small = 
+  demo %>% 
+  select(SEQN, data_release_cycle, gender, age_in_years_at_screening)
+
+# day summaries for all individuals 
+all_days = readr::read_csv(here::here("vignettes", "vignette_data", "all_days.csv.gz")) %>% 
+  select(SEQN, PAXDAYM, MIMS_weartotal, MIMS_waketotal, starts_with("WTPRED"))
+
+# join 
+all_days = 
+  all_days %>% 
+  mutate(across(starts_with("WTPRED"), ~ifelse(is.na(.x), 0, .x))) %>% 
+  left_join(demo_small, by = "SEQN")
+
+# people with > 22 hr wake 
+wake_ids = c(83233, 78159, 69691, 81998, 75556, 82037, 75220, 68655, 71457, 63922)
+wake_wear_sample = 
+  all_days %>% 
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+  filter(WTPRED_1 >= 22 * 60) %>% 
+  filter(SEQN %in% wake_ids) %>% 
+  mutate(type = "wake") %>% 
+  mutate(id_day = paste0(SEQN, "_", PAXDAYM))
+
+# people with > 22 hr sleep 
+sleep_ids = c(80983, 62695, 70542, 64023, 78962, 78526, 79602, 68970,81530, 76711)
+sleep_wear_sample = 
+  all_days %>% 
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+  filter(WTPRED_2 >= 22 * 60) %>% 
+  filter(SEQN %in% sleep_ids) %>% 
+  mutate(type = "sleep") %>% 
+  mutate(id_day = paste0(SEQN, "_", PAXDAYM))
+  # sample_n(size = 10) 
+  # pull(SEQN)
+
+unknown_sample = 
+  all_days %>% 
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+  arrange(desc(WTPRED_4)) %>% 
+  slice(1:8) %>% 
+  mutate(type = "unknown") %>% 
+  mutate(id_day = paste0(SEQN, "_", PAXDAYM))
+
+all_samples = 
+  bind_rows(sleep_wear_sample, wake_wear_sample, unknown_sample)
+
+files = list.files(here::here("vignettes", "vignette_data", "min_files_sleep_wake"),
+                   full.names = TRUE)
+
+all_min_files = 
+  map_dfr(.x = files,
+          .f = readr::read_csv)
+
+all_min_files = all_min_files %>% 
+  select(SEQN, PAXDAYM, PAXPREDM, PAXMTSM, time)
+
+all_min_files_joined = 
+  all_min_files %>% 
+  mutate(id_day = paste0(SEQN, "_", PAXDAYM)) %>% 
+  filter(id_day %in% c(all_samples$id_day)) %>% 
+  left_join(all_samples %>% select(-SEQN, -PAXDAYM), by = "id_day")
+
+transitions = 
+  readr::read_csv(here::here("vignettes", "vignette_data", "wear_transitions.csv.gz"))
+```
+
+```{r}
+#| eval: false
+#| include: false
+
+transitions %>% 
+  mutate(mid = substr(transition, 2, 2)) %>% 
+  group_by(mid) %>% 
+  summarize(mean = mean(bout_length))
+
+```
+
+```{css define scrollable chunk, echo = FALSE}
+.output {
+max-height: 500px;
+overflow-y: scroll;
+}
+```
+
+# Distributions of wake, sleep, nonwear, unkown
+
+First, we can make histograms of the number of minutes predicted for each wear category, across all individuals and days.
+
+```{r}
+labs = c("Wake wear", "Sleep wear", "Nonwear", "Unknown")
+names(labs) = paste("WTPRED_", 1:4, sep = "")
+all_days %>% 
+  pivot_longer(cols = starts_with("WT")) %>% 
+  ggplot(aes(x = value, fill = name))+
+  geom_histogram(col = "black", binwidth = 60) + 
+  facet_wrap(.~name, scales = "free_y", labeller = labeller(name = labs)) +
+  theme_bw() + 
+  scale_fill_paletteer_d("ggthemes::Superfishel_Stone")+
+  scale_x_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2))+
+  theme(legend.position = "none")+
+  labs(x = "Hours", y = "Number of Days", title = "Distribution of Wear Predictions")
+
+
+```
+
+We see that for wake and sleep wear, the distributions are bimodal; there are peaks at zero and around 15 hours for wake and 8 hours for sleep.
+
+However, we know that some days do not have a full 24 hours of observed data; typically, the first and last day of data collection involve less than 24 hours of data by design. Thus, we can remove days for which `WTPRED_1 + WTPRED_2 + WTPRED_3 + WTPRED_4 != 1440`; i.e. days for which the sum of all the wear predictions is not equal to the total number of minutes in a day.
+
+```{r}
+all_days %>% 
+  mutate(sum = WTPRED_1 + WTPRED_2 + WTPRED_3 + WTPRED_4) %>% 
+  filter(sum == 1440) %>% 
+  pivot_longer(cols = starts_with("WT")) %>% 
+  ggplot(aes(x = value, fill = name))+
+  geom_histogram(col = "black", binwidth = 60) + 
+  facet_wrap(.~name, scales = "free_y", labeller = labeller(name = labs)) +
+  theme_bw() + 
+  scale_fill_paletteer_d("ggthemes::Superfishel_Stone")+
+  scale_x_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2))+
+  theme(legend.position = "none")+
+  labs(x = "Hours", y = "Number of Days", title = "Distribution of Wear Predictions, Complete Days Only")
+
+```
+
+We still have some peaks at zero for wake and sleep wear, which is likely due to high amounts of nonwear. To ensure validity of PA estimates, we would like to exclude individuals with more than some threshold of nonwear. Two criteria that are often used are at least `95%` of a day estimated as wear time[^3] or `>=10` hours of (wake) wear.[^4] First, let's look at distributions among days where at least `1440*0.95 = 1368` minutes are categorized as wake, sleep, or unknown.
+
+[^3]: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8277083/
+
+[^4]: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7012355/
+
+```{r}
+n_subs = all_days %>% 
+    filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+    select(SEQN) %>% distinct() %>% nrow()
+
+all_days %>% 
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+  pivot_longer(cols = starts_with("WT")) %>% 
+  ggplot(aes(x = value, fill = name))+
+  geom_histogram(col = "black", binwidth = 60) + 
+  facet_wrap(.~name, scales = "free_y", labeller = labeller(name = labs)) +
+  theme_bw() + 
+  scale_fill_paletteer_d("ggthemes::Superfishel_Stone")+
+  scale_x_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2))+
+  theme(legend.position = "none")+
+  labs(x = "Hours", y = "Number of Days", title = "Days with >= 1368 Minutes of Wake, Sleep, or Unknown", subtitle = paste0("Individuals included = ", n_subs))
+
+# all_days %>% 
+#   filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+#   # pivot_longer(cols = starts_with("WT")) %>% 
+#   ggplot(aes(x = WTPRED_2))+
+#   geom_histogram(col = "black", binwidth = 60, fill ="#FFAE34FF") + 
+#   # facet_wrap(.~name, scales = "free_y", labeller = labeller(name = labs)) +
+#   theme_bw() + 
+#   scale_fill_paletteer_d("ggthemes::Superfishel_Stone")+
+#   scale_x_continuous(breaks=seq(0, 1440, 120),
+#                      labels = seq(0, 24, 2))+
+#   theme(legend.position = "none")+
+#   labs(x = "Hours", y = "Number of Days", title = "Distribution of Sleep Hours in NHANES 2011-2014")
+
+```
+
+We see that there are still some individuals with large amounts of sleep wear, which we may not want to include. We can also look at the wear distributions for individuals with at least `7` hours of wake wear **and** at least `1368` minutes of wake, sleep, or unknown:
+
+```{r}
+n_subs = all_days %>%
+  # filter(WTPRED_1 + WTPRED_2 + WTPRED_4 + WTPRED_3 == 1440) %>%
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+  filter(WTPRED_1 >= 7 * 60) %>% 
+  select(SEQN) %>% distinct() %>% nrow()
+
+all_days %>% 
+  # filter(WTPRED_1 + WTPRED_2 + WTPRED_4 + WTPRED_3 == 1440) %>%
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+  filter(WTPRED_1 >= 7 * 60) %>% 
+  pivot_longer(cols = starts_with("WT")) %>% 
+  ggplot(aes(x = value, fill = name))+
+  geom_histogram(col = "black", binwidth = 60) + 
+  facet_wrap(.~name, scales = "free_y", labeller = labeller(name = labs)) +
+  theme_bw() + 
+  scale_fill_paletteer_d("ggthemes::Superfishel_Stone")+
+  scale_x_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2))+
+  theme(legend.position = "none")+
+  labs(x = "Hours", y = "Number of Days", title  = ">= 1368 Minutes of Wake, Sleep, or Unknown and >=7 Hours of Wake", subtitle = paste0("Individuals included = ", n_subs))
+
+```
+
+We can compare the number of individuals who would be included under the two different criteria:
+
+```{r}
+all_days %>% 
+  mutate(criteria_1368  = (WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368),
+         criteria_7 = (WTPRED_1 >= 7 * 60),
+         both = criteria_1368 & criteria_7) %>% 
+  group_by(SEQN) %>% 
+  summarize(valid_both = sum(both),
+            valid_1368 = sum(criteria_1368)) %>% 
+  summarize(across(c(valid_both, valid_1368),
+                   list(day1 = ~sum(.x >= 1),
+                        day2 = ~sum(.x >= 2),
+                        day3 = ~sum(.x >= 3),
+                        day4 = ~sum(.x >= 4),
+                        day5 = ~sum(.x >= 5),
+                        day6 = ~sum(.x >= 6),
+                        day7 = ~sum(.x >= 7)))) %>% 
+  pivot_longer(cols = contains("valid")) %>% 
+  mutate(days = sub(".*\\_", "", name),
+         criteria = sub("\\_day.*", "", name)) %>% 
+  select(-name) %>% 
+  pivot_wider(names_from = criteria, values_from = value) %>% 
+  mutate(days = 1:7,
+         diff = valid_1368 - valid_both) %>% 
+  select("Minumum Valid Days" = days, 
+         "1368 Min." = valid_1368,
+         "1368 and 7 hr wake" = valid_both,
+         "Difference" = diff) %>% 
+  gt::gt() %>% 
+  gt::tab_header("Individuals Included With Various Wear Criteria") %>% 
+  gt::cols_align("left")
+```
+
+```{r}
+#| include: false
+#| eval: false 
+n_subs = all_days %>%
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>%
+  filter(WTPRED_1 >= 7 * 60) %>% 
+  select(SEQN) %>% distinct() %>% nrow()
+
+all_days %>% 
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>%
+  filter(WTPRED_1 >= 7 * 60) %>% 
+  pivot_longer(cols = starts_with("WT")) %>% 
+  ggplot(aes(x = value, fill = name))+
+  geom_histogram(col = "black", binwidth = 60) + 
+  facet_wrap(.~name, scales = "free_y", labeller = labeller(name = labs)) +
+  theme_bw() + 
+  scale_fill_paletteer_d("ggthemes::Superfishel_Stone")+
+  scale_x_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2))+
+  theme(legend.position = "none")+
+  labs(x = "Hours", y = "Number of Days", title  = ">= 7  Hours of Wake Wear, >= 1368 minutes of Wake, Sleep, Unknown", subtitle = paste0("Individuals included = ", n_subs))
+
+```
+
+# Wake, sleep, unknown
+
+Let's look at some of the individuals we would exclude by requiring `7` hours of wake wear, and also look at individuals who have very little sleep wear. First, we plot wake wear vs. sleep wear, colored by total MIMS[^5] for the day. We would expect most individuals to have between 6 and 10 hours of sleep and 14-18 hours of wake, but there are many days with wake and sleep hours outside of these boundaries. As expected, we see in general that higher wake is associated with higher total MIMS, and vice versa.
+
+[^5]: https://pubmed.ncbi.nlm.nih.gov/34308270/
+
+```{r}
+all_1368 = 
+  all_days %>% 
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368)
+
+all_1368 %>% 
+  ggplot(aes(x = WTPRED_1, y = WTPRED_2, col =MIMS_weartotal))+
+  geom_point(alpha = .2, size = .5) + 
+  theme_bw() +
+  labs(x = "Wake Wear (hours)", y = "Sleep Wear (hours)", title = "Wake Wear vs. Sleep Wear")+
+  # coord_equal()+
+  scale_x_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2),
+                     limits = c(0,1440))+
+  scale_y_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2), 
+                     limits = c(0, 1440))+
+  scale_color_paletteer_c("ggthemes::Sunset-Sunrise Diverging", direction = 1,
+                          name = "Total MIMS")+
+  theme(legend.position = "bottom")+
+  guides(color = guide_colorbar(barheight = unit(.9, "cm"), barwidth = unit(5, "cm")))
+  # geom_vline(xintercept = c(14*60,18*60))+
+  # geom_hline(yintercept = c(6*60,10*60))
+
+
+
+```
+
+## \>22 Hours of Sleep
+
+Let's look at people on the extreme ends of wake and sleep. We focus on the days with `>22` hours of predicted sleep wear, and examine the distribution of days per individual with more than 22 hours of sleep. We see the of these days come from just one individual, but some individuals have 2 or more days with more than 22 hours of sleep.
+
+```{r}
+all_1368 %>% 
+  filter(WTPRED_2 >= 22 * 60) %>% 
+  group_by(SEQN) %>% 
+  count() %>% 
+  ungroup() %>% 
+  count(n) %>% 
+  ggplot(aes(x = n, y = nn))+
+  geom_bar(stat = "identity", col = "black", fill = "#FFAE34FF")+
+  theme_bw() + 
+  labs(x = "Number of Days per Person with > 22 Hours Sleep Wear",
+       y = "Count")+
+  scale_x_continuous(breaks = seq(1, 7, 1))+
+  scale_y_continuous(breaks=seq(0,150,20))
+```
+
+```{r}
+#| include: false 
+#| eval: false 
+options(digits.secs = 3)
+raw = readr::read_csv(here::here("lily", "data", "78159.csv.gz"))
+raw %>% 
+  group_by(day = floor_date(HEADER_TIMESTAMP, unit = "1 day")) %>% 
+  summarize(across(X:Z,
+                   list(mean = ~mean(.x),
+                        sd = ~sd(.x))))
+raw_small = 
+  raw %>% 
+  filter(floor_date(HEADER_TIMESTAMP, unit = "1 day") == as.POSIXct("2000-01-03", tz = "UTC"))
+readr::write_csv(raw_small, here::here("lily", "data", "78149_day2.csv.gz"))
+raw_small %>% 
+  summarize(across(X:Z,
+                   list(mean = ~mean(.x),
+                        sd = ~sd(.x))))
+
+all_days %>% 
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_3 + WTPRED_4 == 1440) %>% 
+  filter(MIMS_weartotal == 0 & WTPRED_3 != 1440) %>% 
+  filter(WTPRED_3 != 1439) %>% 
+  print(n = Inf)
+```
+
+We take a random sample of 10 individuals who had more than 22 hours of sleep wear on at least one day, and plot their MIMS at the minute level across the whole day, colored by the wear prediction. We also plot a horizontal line at 10.558 MIMS, which is an approximate boundary between sedentary and active in older adults.[^6]
+
+[^6]: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9356340/
+
+```{r}
+#| class: output 
+
+ids = unique(all_min_files_joined %>%
+                 filter(type == "sleep") %>%
+                 pull(SEQN))
+  for(subject in 1:length(ids)){
+    subj = ids[subject]
+    age = all_min_files_joined %>%
+      filter(SEQN == subj) %>%
+      slice(1) %>%
+      pull(age_in_years_at_screening)
+    p =
+      all_min_files_joined %>%
+      filter(SEQN == subj) %>%
+      mutate(pred = factor(
+        case_when(
+          PAXPREDM == 1 ~ "Wake",
+          PAXPREDM == 2 ~ "Sleep",
+          PAXPREDM == 3 ~ "Nonwear",
+          PAXPREDM == 4 ~ "Unknown"
+        ),
+        levels = c("Wake", "Sleep", "Nonwear", "Unknown")),
+        minutes = paste0("Day ", PAXDAYM, " Sleep min = ", WTPRED_2)) %>%
+      ggplot(aes(
+        x = time,
+        y = PAXMTSM,
+        col = pred,
+        group = 1
+      )) +
+      geom_line() +
+      facet_wrap(. ~ minutes, scales = "free_x", nrow = 3) +
+      labs(x = "Time", y = "MIMS", title = paste0("SEQN ", subj, " ", age, " y.o.")) +
+      theme_bw() +
+      scale_x_datetime(labels = date_format("%H:%M")) +
+      theme(legend.position = "bottom") +
+      scale_color_manual(
+        name = "Prediction",
+        values = c(
+          "Wake" = "#6388B4FF",
+          "Sleep" = "#FFAE34FF",
+          "Nonwear" = "#EF6F6AFF",
+          "Unknown" = "#8CC2CAFF"
+        )
+      )+
+      geom_hline(yintercept = 10.558)
+   print(p)
+  }
+```
+
+## \>22 Hours of Wake
+
+We make analogous plots for individuals with more than 22 hours of wake. With the exception of individual 78159, who is 4 years old, it appears most of these individuals were in fact active all day.
+
+```{r}
+all_1368 %>% 
+  filter(WTPRED_1 >= 22 * 60) %>% 
+  group_by(SEQN) %>% 
+  count() %>% 
+  ungroup() %>% 
+  count(n) %>% 
+  ggplot(aes(x = n, y = nn))+
+  geom_bar(stat = "identity", col = "black", fill = "#6388B4FF")+
+  theme_bw() + 
+  labs(x = "Number of Days per Person with > 22 Hours Wake Wear",
+       y = "Count")+
+  scale_x_continuous(breaks = seq(1, 7, 1))+
+  scale_y_continuous(breaks=seq(0,150,20))
+
+```
+
+```{r}
+#| class: output
+ids = unique(all_min_files_joined %>% 
+          filter(type == "wake") %>% 
+          pull(SEQN))
+for(subject in 1:length(ids)){
+  subj = ids[subject]
+  age = all_min_files_joined %>% 
+    filter(SEQN == subj) %>% 
+    slice(1) %>% 
+    pull(age_in_years_at_screening)
+  p = 
+    all_min_files_joined %>%
+    filter(SEQN == subj) %>%
+    mutate(pred = factor(
+      case_when(
+        PAXPREDM == 1 ~ "Wake",
+        PAXPREDM == 2 ~ "Sleep",
+        PAXPREDM == 3 ~ "Nonwear",
+        PAXPREDM == 4 ~ "Unknown"
+      ),
+      levels = c("Wake", "Sleep", "Nonwear", "Unknown")),
+      minutes = paste0("Day ", PAXDAYM, " Wake min = ", WTPRED_1)) %>% 
+    ggplot(aes(
+      x = time,
+      y = PAXMTSM,
+      col = pred,
+      group = 1
+    )) +
+    geom_line() +
+    facet_wrap(. ~ minutes, scales = "free_x", nrow = 3) +
+    labs(x = "Time", y = "MIMS", title = paste0("SEQN ", subj, " ", age, " y.o.")) +
+    theme_bw() +
+    scale_x_datetime(labels = date_format("%H:%M")) +
+    theme(legend.position = "bottom") +
+    scale_color_manual(
+      name = "Prediction",
+      values = c(
+        "Wake" = "#6388B4FF",
+        "Sleep" = "#FFAE34FF",
+        "Nonwear" = "#EF6F6AFF",
+        "Unknown" = "#8CC2CAFF"
+      )
+    )+
+    geom_hline(yintercept = 10.558)
+  print(p)
+}
+
+  
+```
+
+## Large amounts of unknown
+
+We look at the distribution of time characterized as 'unknown', and also look at total unknown minutes vs. total MIMS, wake wear, and sleep wear. For the scatterplots, we look at only individuals with `<=3` hours of unknown wear for easier visualization.
+
+```{r}
+#| class: output 
+
+all_1368 %>% 
+  ggplot(aes(x = WTPRED_4))+
+  geom_histogram(col = "black", binwidth = 30, fill = "#8CC2CAFF") + 
+  theme_bw() + 
+  scale_fill_paletteer_d("ggthemes::Superfishel_Stone")+
+  scale_x_continuous(breaks=seq(0, 1440, 30),
+                     labels = seq(0, 24, .5))+
+  theme(legend.position = "none")+
+  labs(x = "Hours", y = "Count", title = "Distribution of Unkown Wear")
+
+all_1368 %>% 
+  filter(MIMS_weartotal < 60000) %>% 
+  ggplot(aes(y = MIMS_weartotal, x = WTPRED_4))+
+  geom_point(alpha = .1, size = .5) +
+  theme_bw() + 
+  geom_smooth()+
+  scale_x_continuous(breaks=seq(0, 1440, 30),
+                     labels = seq(0, 24, .5),
+                     limits= c(0, 3*60))+
+  labs(x = "Hours Unkown Wear", y = "Total MIMS", "Total MIMS vs. Unknown Wear")
+
+
+all_1368 %>% 
+  ggplot(aes(y = WTPRED_1, x = WTPRED_4))+
+  geom_point(alpha = .1, size = .5) +
+  theme_bw() + 
+  geom_smooth()+
+  scale_x_continuous(breaks=seq(0, 1440, 30),
+                     labels = seq(0, 24, .5),
+                     limits= c(0, 3*60))+
+  labs(x = "Hours Unkown Wear", y = "Hours Wake Wear", "Wake Wear vs. Unknown Wear")+
+  scale_y_continuous(breaks=seq(0, 1440, 60),
+                     labels = seq(0, 24, 1))
+
+all_1368 %>% 
+  ggplot(aes(y = WTPRED_2, x = WTPRED_4))+
+  geom_point(alpha = .1, size = .5) +
+  theme_bw() + 
+  geom_smooth()+
+  scale_x_continuous(breaks=seq(0, 1440, 30),
+                     labels = seq(0, 24, .5),
+                     limits= c(0, 3*60))+
+  labs(x = "Hours Unkown Wear", y = "Hours Sleep Wear", title = "Sleep Wear vs. Unkown Wear")+
+  scale_y_continuous(breaks=seq(0, 1440, 60),
+                     labels = seq(0, 24, 1))
+
+```
+
+It's unclear how the 'unknown' wear should be treated. First, we can look at a few individuals with the highest amount of unknown wear. At least from this small sample, it seems unknown is usually sandwiched between wake and/or movement.
+
+```{r}
+#| class: output
+ids = unique(all_min_files_joined %>% 
+          filter(type == "unknown") %>% 
+          pull(SEQN))
+for(subject in 1:length(ids)){
+  subj = ids[subject]
+  age = all_min_files_joined %>% 
+    filter(SEQN == subj) %>% 
+    slice(1) %>% 
+    pull(age_in_years_at_screening)
+  p = 
+    all_min_files_joined %>%
+    filter(SEQN == subj) %>%
+    mutate(pred = factor(
+      case_when(
+        PAXPREDM == 1 ~ "Wake",
+        PAXPREDM == 2 ~ "Sleep",
+        PAXPREDM == 3 ~ "Nonwear",
+        PAXPREDM == 4 ~ "Unknown"
+      ),
+      levels = c("Wake", "Sleep", "Nonwear", "Unknown")),
+      minutes = paste0("Day ", PAXDAYM, " Unknown min = ", WTPRED_4)) %>% 
+    ggplot(aes(
+      x = time,
+      y = PAXMTSM,
+      col = pred,
+      group = 1
+    )) +
+    geom_line() +
+    facet_wrap(. ~ minutes, scales = "free_x", nrow = 3) +
+    labs(x = "Time", y = "MIMS", title = paste0("SEQN ", subj, " ", age, " y.o.")) +
+    theme_bw() +
+    scale_x_datetime(labels = date_format("%H:%M")) +
+    theme(legend.position = "bottom") +
+    scale_color_manual(
+      name = "Prediction",
+      values = c(
+        "Wake" = "#6388B4FF",
+        "Sleep" = "#FFAE34FF",
+        "Nonwear" = "#EF6F6AFF",
+        "Unknown" = "#8CC2CAFF"
+      )
+    )+
+    geom_hline(yintercept = 10.558)
+  print(p)
+}
+
+  
+```
+
+# Transitions and Bout Durations
+
+To further explore "unknown" minutes, we can look at the wear predictions preceding and following unknown wear. Reassuringly, we see that unknown most often falls between wake wear or sleep wear, and the typical bout duration for unknown periods are short.
+
+```{r}
+transitions %>% 
+  mutate(state = substr(transition, 2, 2)) %>% 
+  filter(state == "U") %>% 
+  mutate(pre = substr(transition, 1, 1),
+         post = substr(transition, 3, 3)) %>% 
+  group_by(SEQN) %>% 
+  mutate(total = sum(n),
+         prop = n / total) %>% 
+  ungroup() %>% 
+  group_by(transition, pre, post) %>% 
+  summarize(mean_prop = mean(prop)) %>% 
+  ggplot(aes(x = pre, y = post, fill = mean_prop))+
+  geom_tile()+
+  theme_bw() + 
+  labs(y = "State Following Unkown", x = "State Preceding Unknown", title = "Unknown Transitions")+
+  # scale_fill_viridis_c(option = "C",
+  #                      breaks=seq(0, .5, .1),
+  #                      limits = c(0,.5), 
+  #                      name = "Proportion of Transitions")+
+  scale_fill_paletteer_c("ggthemes::Sunset-Sunrise Diverging", direction = 1,
+                          name = "Proportion of Transitions")+
+  geom_text(aes(label = round(mean_prop, 3)), col = "white")+
+  guides(fill = guide_colorbar(barheight = unit(.9, "cm"), barwidth = unit(5, "cm")))+
+  theme(legend.position = "bottom")+
+  scale_x_discrete(labels = c("Nonwear", "Sleep Wear", "Unkown", "Wake Wear"))+
+  scale_y_discrete(labels=c("Nonwear", "Sleep Wear", "Unknown", "Wake Wear"))
+
+
+names = c("Wake", "Sleep", "Nonwear", "Unknown")
+names(names) = c("W", "S", "N", "U")
+transitions %>% 
+  mutate(state = substr(transition, 2, 2)) %>% 
+  group_by(SEQN, state) %>% 
+  summarize(mean_bout = mean(bout_length)) %>% 
+  ungroup() %>% 
+  # filter(state == "S") %>% 
+  group_by(state) %>%
+  mutate(mean_bout = DescTools::Winsorize(mean_bout, quantile(mean_bout, probs = c(0, .99)))) %>% 
+  mutate(state = factor(state, levels = c("W", "S", "N", "U"))) %>% 
+  ggplot(aes(x = mean_bout))+
+  geom_histogram(col = "black", aes(fill = state))+
+  facet_wrap(.~state, scales = "free", labeller = labeller(state = names))+
+  labs(x = "Average Bout Duration per Individual (minutes)", y = "Count", title  = "Mean Bout Duration per Individual")+
+  scale_fill_manual(
+      name = "Prediction",
+      values = c(
+        "W" = "#6388B4FF",
+        "S" = "#FFAE34FF",
+        "N" = "#EF6F6AFF",
+        "U" = "#8CC2CAFF"
+      )
+    )+
+  theme_bw()+
+  theme(legend.position = "none")
+
+
+
+# transitions %>% 
+#   mutate(state = substr(transition, 2, 2)) %>% 
+#   group_by(state) %>%
+#   mutate(bout_length = DescTools::Winsorize(bout_length, probs = c(0, .99))) %>% 
+#   mutate(state = factor(state, levels = c("W", "S", "N", "U"))) %>% 
+#   ggplot(aes(x = bout_length))+
+#   geom_histogram(col = "black", aes(fill = state))+
+#   facet_wrap(.~state, scales = "free", labeller = labeller(state = names))+
+#   labs(x = "Bout Duration (minutes)", y = "Count", title = "Bout Durations")+
+#   scale_fill_manual(
+#       name = "Prediction",
+#       values = c(
+#         "W" = "#6388B4FF",
+#         "S" = "#FFAE34FF",
+#         "N" = "#EF6F6AFF",
+#         "U" = "#8CC2CAFF"
+#       )
+#     )+
+#   theme_bw()+
+#   theme(legend.position = "none")
+
+```
+
+We can make transition matrices for sleep and wake as well:
+
+```{r}
+transitions %>% 
+  mutate(state = substr(transition, 2, 2)) %>% 
+  filter(state == "S") %>% 
+  mutate(pre = substr(transition, 1, 1),
+         post = substr(transition, 3, 3)) %>% 
+  group_by(SEQN) %>% 
+  mutate(total = sum(n),
+         prop = n / total) %>% 
+  ungroup() %>% 
+  group_by(transition, pre, post) %>% 
+  summarize(mean_prop = mean(prop)) %>% 
+  ggplot(aes(x = pre, y = post, fill = mean_prop))+
+  geom_tile()+
+  theme_bw() + 
+  labs(y = "State Following Sleep", x = "State Preceding Sleep", title = "Sleep Transitions")+
+  # scale_fill_viridis_c(option = "C",
+  #                      breaks=seq(0, 1, .1),
+  #                      name = "Proportion of Transitions")+
+  scale_fill_paletteer_c("ggthemes::Sunset-Sunrise Diverging", direction = 1,
+                          name = "Proportion of Transitions")+
+  geom_text(aes(label = round(mean_prop, 3)), col = "white")+
+  guides(fill = guide_colorbar(barheight = unit(.9, "cm"), barwidth = unit(5, "cm")))+
+  # geom_text(aes(label = round(mean_prop, 3)), col = "grey")+
+  theme(legend.position = "bottom")+
+  scale_x_discrete(labels = c("Unkown", "Wake Wear"))+
+  scale_y_discrete(labels=c("Unknown", "Wake Wear"))
+
+transitions %>% 
+  mutate(state = substr(transition, 2, 2)) %>% 
+  filter(state == "W") %>% 
+  mutate(pre = substr(transition, 1, 1),
+         post = substr(transition, 3, 3)) %>% 
+  group_by(SEQN) %>% 
+  mutate(total = sum(n),
+         prop = n / total) %>% 
+  ungroup() %>% 
+  group_by(transition, pre, post) %>% 
+  summarize(mean_prop = mean(prop)) %>% 
+  ggplot(aes(x = pre, y = post, fill = mean_prop))+
+  geom_tile()+
+  theme_bw() + 
+  labs(y = "State Following Wear", x = "State Preceding Wear", title = "Wear Transitions")+
+  # scale_fill_viridis_c(option = "C",
+  #                      breaks=seq(0, 1, .2),
+  #                      name = "Proportion of Transitions")+
+  # geom_text(aes(label = round(mean_prop, 3)), col = "grey")+
+  scale_fill_paletteer_c("ggthemes::Sunset-Sunrise Diverging", direction = 1,
+                          name = "Proportion of Transitions")+
+  geom_text(aes(label = round(mean_prop, 3)), col = "white")+
+  guides(fill = guide_colorbar(barheight = unit(.9, "cm"), barwidth = unit(5, "cm")))+
+  theme(legend.position = "bottom")+
+  scale_x_discrete(labels = c("Nonwear", "Sleep", "Unknown"))+
+  scale_y_discrete(labels = c("Nonwear", "Sleep", "Unknown"))
+
+
+```
+
+# Towards a final criteria
+
+Based on the above visualizations, we think the following criteria is reasonable for a day to be considered valid:
+
+-   At least 1368 minutes (95% of a full day) of wake, sleep, or unknown
+-   At least 7 hours (420 minutes) of wake wear
+
+However, based on the visualizations for SEQN 78159, we want to add one more criteria on number of minutes per day with 0 MIMS. We can visualize the number of minutes per day with 0 MIMS, among valid days by the above criteria.
+
+```{r}
+wear %>% 
+  mutate(criteria_1368 = W + S + U >= 1368, 
+         criteria_wake7 = W >= 60 * 7,
+         criteria_both = criteria_1368 & criteria_wake7) %>% 
+  filter(criteria_both) %>% 
+  ggplot(aes(x = MIMS_0))+
+  geom_histogram(binwidth = 30, col = "black", fill = "#767676FF")+
+  theme_bw() + 
+  scale_x_continuous(breaks=seq(0,24*60,60),
+                     labels = seq(0, 24, 1))+
+  labs(x = "Time with MIMS = 0 (hr)", y = "Count", title = "Distribution of Minutes per Day with 0 MIMS",
+       subtitle = "Among days with >= 1368 wear minutes and >= 7 hours wake wear")
+
+wear %>% 
+  mutate(criteria_1368 = W + S + U >= 1368, 
+         criteria_wake7 = W >= 60 * 7,
+         criteria_both = criteria_1368 & criteria_wake7) %>% 
+  filter(criteria_both) %>% 
+  pivot_longer(cols = c(S, N, W, U)) %>% 
+  mutate(name = factor(name, levels = c("W", "S", "N", "U"))) %>% 
+  ggplot(aes(x = MIMS_0, y = value, col = name))+
+  geom_point(alpha = .1, size = .5)+
+  facet_wrap(.~name, labeller = labeller(name = names)) + 
+  scale_color_manual(
+      name = "Prediction",
+      values = c(
+        "W" = "#6388B4FF",
+        "S" = "#FFAE34FF",
+        "N" = "#EF6F6AFF",
+        "U" = "#8CC2CAFF"
+      )
+    )+
+  scale_x_continuous(breaks=seq(0,24*60,120),
+                     labels = seq(0, 24, 2))+
+  scale_y_continuous(breaks=seq(0,24*60,120),
+                     labels = seq(0, 24, 2))+
+  labs(x = "Time with MIMS = 0 (hr)", y = "Time (hr)", title = "Daily Wear Predictions vs. Daily Minutes with 0 MIMS")+
+  theme_bw()+
+  theme(legend.position = "none") 
+  
+```
+
+It seems reasonable to also require at least 7 hours of the day to have nonzero MIMS; or no more than 17 hours per day with 0 MIMS. This only excludes one more individual, SEQN 71859.
+
+```{r}
+wear %>% 
+  mutate(criteria_1368 = W + S + U >= 1368, 
+         criteria_wake7 = W >= 60 * 7,
+        MIMS_nonzero = W + S + U + N - MIMS_0,
+        criteria_MIMS = MIMS_nonzero >= 60 * 7,
+        criteria_all = criteria_1368 & criteria_wake7 & criteria_MIMS,
+        criteria_both = criteria_1368 & criteria_wake7) %>% 
+  filter(criteria_both & !criteria_all) %>% 
+  select(SEQN, PAXDAYM, W, S, U, N, MIMS_0)
+  
+```
+
+We can look at the distribution of valid days per individual, based on this criteria.
+
+```{r}
+all_days_valid = 
+  all_days %>% 
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>%
+  filter(WTPRED_1 >= 7 * 60) %>% 
+  filter(MIMS_weartotal > 0)
+
+all_days_valid %>% 
+  group_by(SEQN) %>% 
+  count() %>% 
+  ggplot(aes(x= n))+
+  geom_bar(stat = "count", col = "black", fill = "#767676FF")+
+  theme_bw() + 
+  labs(x = "Number Valid Days", y = "Count", title = "Distribution of Valid Days per Individual")+
+  scale_x_continuous(breaks=seq(1, 7, 1))
+```
+
+# Valid days and covariates
+
+We can also explore whether the number of valid days per person is associated with physical activity, age, or sex.
+
+First we plot the number of valid days per individual and mean daily MIMS. There doesn't appear to be a relationship between valid days and mean MIMS, which is reassuring.
+
+```{r}
+all_days_valid %>% 
+  group_by(SEQN) %>% 
+  mutate(valid_days = n()) %>% 
+  group_by(SEQN, gender, age_in_years_at_screening, valid_days) %>% 
+  summarize(across(c(MIMS_weartotal, WTPRED_1, WTPRED_2), 
+                   ~mean(.x))) %>% 
+  mutate(valid_days = factor(valid_days, levels = 1:7)) %>% 
+  ggplot(aes(x = valid_days, y = MIMS_weartotal, fill = gender))+
+  geom_boxplot()+
+  theme_bw()+
+  scale_fill_manual(values = c("#BB7693FF", "#55AD89FF"), name = "")+
+  labs(x = "Valid Days", y = "Mean Daily MIMS")+
+  theme(legend.position = "bottom")
+
+
+all_days_valid %>% 
+  group_by(SEQN) %>% 
+  mutate(valid_days = n()) %>% 
+  group_by(SEQN, gender, age_in_years_at_screening, valid_days) %>% 
+  summarize(across(c(MIMS_weartotal, WTPRED_1, WTPRED_2), 
+                   ~mean(.x))) %>% 
+  ggplot(aes(x = valid_days, y = MIMS_weartotal))+
+  geom_boxplot(aes(group = valid_days),outlier.shape=NA)+
+  geom_jitter(width = .3, alpha = .05)+
+  theme_bw()+
+  scale_x_continuous(breaks=seq(1, 7, 1))+
+  labs(x = "Valid Days", y = "Mean MIMS")
+```
+
+```{r}
+#| eval: false
+#| include: false 
+
+#We could fit a Poisson regression, too: 
+
+dat = 
+  all_days_valid %>% 
+  group_by(SEQN) %>% 
+  mutate(valid_days = n()) %>% 
+  group_by(SEQN, gender, age_in_years_at_screening, valid_days) %>% 
+  summarize(across(c(MIMS_weartotal, WTPRED_1, WTPRED_2), 
+                   ~mean(.x))) %>% 
+  mutate(MIMS_1000 = MIMS_weartotal/1000)
+
+fit = glm(valid_days ~ MIMS_1000, data = dat, family = "poisson")
+
+fit %>% 
+  broom::tidy(exponentiate = TRUE)
+```
+
+It does appear, however, that older individuals are more likely to have a higher amount of valid days.
+
+```{r}
+all_days %>%
+  mutate(valid = (WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) & (WTPRED_1 >= 7 * 60) & MIMS_weartotal > 0) %>%
+  group_by(SEQN, gender, age_in_years_at_screening) %>%
+  summarize(valid_days = factor(sum(valid), levels = 0:7)) %>%
+  ggplot(aes(x = valid_days, y = age_in_years_at_screening, fill = gender))+
+  geom_boxplot(position = position_dodge())+
+  theme_bw()+
+  labs(x = "Valid Days", y = "Age (years)")+
+ scale_fill_manual(values = c("#BB7693FF", "#55AD89FF"), name = "")+
+    theme(legend.position = "bottom")
+
+
+
+```
+
+Finally, we can see whether valid days are associated with sex. There don't appear to be massive differences, although females make up a larger proportion of individuals with 4+ valid days.
+
+```{r}
+# all_days %>%
+#   mutate(valid = (WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) & (WTPRED_1 >= 7 * 60) & MIMS_weartotal > 0) %>%
+#   group_by(SEQN, gender, age_in_years_at_screening) %>%
+#   summarize(valid_days = factor(sum(valid), levels = 0:7)) %>% 
+#   group_by(valid_days, gender) %>% 
+#   count() %>% 
+#   ggplot(aes(x = valid_days, y = n, fill = gender))+
+#   geom_bar(position = "dodge", stat = "identity")+
+#   theme_bw() + 
+#   scale_fill_manual(values = c("#006DDBFF", "#920000FF"), name = "")+
+#   labs(x = "Valid Days", y = "Count")
+
+all_days %>%
+  mutate(valid = (WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) & (WTPRED_1 >= 7 * 60) & MIMS_weartotal > 0) %>%
+  group_by(SEQN, gender, age_in_years_at_screening) %>%
+  summarize(valid_days = factor(sum(valid), levels = 0:7)) %>%
+  group_by(valid_days, gender) %>%
+  count() %>%
+  group_by(valid_days) %>%
+  mutate(total = sum(n)) %>%
+  ungroup() %>%
+  mutate(prop = n / total) %>%
+  ggplot(aes(x = valid_days, y = prop, fill = gender))+
+  geom_bar(position = "dodge", stat = "identity", col = "black")+
+  theme_bw() +
+  scale_fill_manual(values = c("#BB7693FF", "#55AD89FF"), name = "")+
+  labs(x = "Valid Days", y = "Proportion of Individuals in Category")+
+  scale_y_continuous(breaks=seq(0, 0.6, .05))+
+  theme(legend.position = "bottom")
+
+```
+
+```{r}
+#| eval: false
+#| include: false 
+
+dat = 
+  all_days %>%
+  mutate(valid = (WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) & (WTPRED_1 >= 7 * 60) & MIMS_weartotal > 0) %>%
+  group_by(SEQN, gender, age_in_years_at_screening) %>%
+  summarize(valid_days = sum(valid)) %>% 
+  mutate(age_5 = age_in_years_at_screening / 5)
+
+fit = glm(valid_days ~ gender + age_5, data = dat, family = "poisson")
+
+fit %>% 
+  broom::tidy(exponentiate = TRUE) 
+
+
+```
+
+# Patterns of wake, sleep wear by age
+
+Finally, we can look at patterns of sleep and wake wear by age, among valid days by our criteria.
+
+```{r}
+
+median = 
+  all_days_valid %>% 
+  filter(age_in_years_at_screening >= 15) %>% 
+  summarize(median = median(WTPRED_1)) %>% 
+  pull(median)
+
+all_days_valid %>% 
+  filter(age_in_years_at_screening >= 15) %>% 
+  mutate(age_group = cut(age_in_years_at_screening, breaks=seq(0,85, 5), include.lowest = TRUE)) %>% 
+  ggplot(aes(x = WTPRED_1, y = age_group, fill = age_group))+
+  geom_density_ridges()+
+  theme_bw() + 
+  scale_fill_paletteer_d("ggthemes::Hue_Circle")+
+  theme(legend.position = "none")+
+  scale_x_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2))+
+  labs(x = "Wake Wear (hr)", y = "Age Group")+
+  geom_vline(xintercept = median, col = "white")+
+  annotate("text", x = 22*60, y = 15, label = paste0("Overall median = ", round(median / 60, 1)))
+  # geom_text(aes(x = 22 * 60, y = 15, label = median))
+
+
+median = 
+  all_days_valid %>% 
+  filter(age_in_years_at_screening >= 15) %>% 
+  summarize(median = median(WTPRED_2)) %>% 
+  pull(median)
+
+all_days_valid %>% 
+  filter(age_in_years_at_screening >= 15) %>% 
+  mutate(age_group = cut(age_in_years_at_screening, breaks=seq(0,85, 5), include.lowest = TRUE)) %>% 
+  ggplot(aes(x = WTPRED_2, y = age_group, fill = age_group))+
+  geom_density_ridges()+
+  theme_bw() + 
+  scale_fill_paletteer_d("ggthemes::Hue_Circle")+
+  theme(legend.position = "none")+
+  scale_x_continuous(breaks=seq(0, 1440, 120),
+                     labels = seq(0, 24, 2))+
+  labs(x = "Sleep Wear (hr)", y = "Age Group")+
+  geom_vline(xintercept = median, col = "white")+
+  annotate("text", x = 16*60, y = 15, label = paste0("Overall median = ", round(median / 60, 1)))
+
+```
+
+```{r}
+#| include: false
+
+n_1368 = 
+  all_days %>%  
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+  select(SEQN) %>% 
+  distinct() %>% 
+  nrow()
+n_total = length(unique(all_days$SEQN))
+
+n_wake = 
+  all_days %>%  
+  filter(WTPRED_1 + WTPRED_2 + WTPRED_4 >= 1368) %>% 
+  filter(WTPRED_1 >= 420) %>% 
+  select(SEQN) %>% 
+  distinct() %>% 
+  nrow()
+
+
+```

@@ -1,0 +1,1747 @@
+---
+title: "NHANES Steps Vignette"
+format:
+  html:
+    toc: true
+    toc-location: right
+    embed-resources: true
+    code-background: true
+    code-tools: true
+    code-fold: true
+    code-block-border-left: true
+    code-link: true
+    other-links:
+      text: GitHub Repo
+      icon: github
+      href: https://github.com/lilykoff/nhanes_steps_mortality
+theme: flatly
+execute:
+  echo: true
+  cache: true
+  message: false
+  warning: false
+editor: source
+---
+
+```{r}
+# load packages and define colors 
+library(tidyverse)
+library(gtsummary)
+library(gt)
+library(tidymodels)
+library(censored)
+library(paletteer)
+library(survey)
+library(patchwork)
+library(consort)
+library(data.table)
+col1 = "#CC5151"; col2 = "#422CB2" # from paletteer_d("colorBlindness::SteppedSequential5Steps")
+# paletteer_d("ggthemes::colorblind") # for colorblind friendly palette
+col_vec = c("#000000FF", "#009E73FF", "#CC79A7FF", "#E69F00FF", "#D55E00FF", "#56B4E9FF", "#0072B2FF")
+
+winsorize = function (x, val = quantile(x, probs = c(0.05, 0.95), na.rm = FALSE)) {
+  x[x < val[1L]] <- val[1L]
+  x[x > val[2L]] <- val[2L]
+  return(x)
+}
+```
+
+The purpose of this vignette is to accompany xxx manuscript on step counts in NHANES 2011-2014. 
+
+# Background 
+
+[NHANES](https://wwwn.cdc.gov/nchs/nhanes/) is a nationally representative study of about 5,000 Americans per year. The study
+includes demographic, socioeconomic, dietary, and health-related questions; data from the
+survey are publicly available. All NHANES study participants age six and older ([2011-12, Wave G](https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/PAXMIN_G.htm)) or age three or older ([2013-14, Wave H](https://wwwn.cdc.gov/Nchs/Nhanes/2013-2014/PAXMIN_H.htm)) were asked to wear an ActiGraph
+GT3X+ on the non-dominant wrist starting on the day of their exam at the NHANES
+Mobile Examination Center. They were instructed to wear the device at all times for seven
+consecutive days and remove the device on the morning of the ninth day. The devices
+collected triaxial acceleration at 80 Hz.
+
+In 2022, the [raw accelerometer data](https://wwwn.cdc.gov/Nchs/Nhanes/2013-2014/PAX80_H.htm) were released. We downloaded the raw data and applied four open source and one proprietary step count algorithm to the raw data. The algorithms are: 
+
++ Actilife (proprietary) 
++ ADEPT^[[https://pubmed.ncbi.nlm.nih.gov/31545345/](https://pubmed.ncbi.nlm.nih.gov/31545345/)]
++ Oak^[[https://www.nature.com/articles/s41746-022-00745-z](https://www.nature.com/articles/s41746-022-00745-z)]
++ Verisense (original and revised)^[[https://github.com/ShimmerEngineering/Verisense-Toolbox/tree/master/Verisense_step_algorithm](https://github.com/ShimmerEngineering/Verisense-Toolbox/tree/master/Verisense_step_algorithm)]
++ stepcount (random forest and self-supervised learner)^[[https://www.medrxiv.org/content/10.1101/2023.02.20.23285750v1](https://www.medrxiv.org/content/10.1101/2023.02.20.23285750v1)]
+
+We also obtained ActiGraph [Activity Counts](https://www.nature.com/articles/s41598-022-16003-x) (AC) and used [Monitor Independent Movement Summaries](https://pubmed.ncbi.nlm.nih.gov/34308270/) (MIMS) provided by NHANES. 
+
+Our pipeline for processing the raw data and obtaining minute-level step counts can be found at [https://github.com/muschellij2/nhanes_80hz](https://github.com/muschellij2/nhanes_80hz). The minute level data, in 1440 format, are available for download on Physionet (include link). 
+
+In this vignette, we start with data that has been summarized at the subject level, and investigate: 
+
+1. Distributions of steps by age 
+2. Correlation between step algorithms and other PA summaries
+3. Performance of step counting algorithms in single- and multivariable mortality prediction
+
+::: {.callout-note}
+The github repo accompanying this analysis can be found at       [https://github.com/lilykoff/nhanes_steps_mortality](https://github.com/lilykoff/nhanes_steps_mortality)
+:::
+
+
+# Data processing 
+
+Briefly, the process from minute-level data to subject-level data is as follows: 
+
++ For each step algorithm or PA variable, create day summaries by summing values across any minute of the day that does not have any data quality flags and is classified by NHANES as wake wear, sleep wear, or unknown
++ For each subject, take mean of day summaries across all valid days, where valid days are defined as days that meet the following criteria: 
+  + At least 1,368 minutes (95\% of a full day) were classified as wake wear, sleep wear, or unknown and did not have any data quality flags
+  + At least seven hours (420 minutes) of the day were classified as wake wear
+  + At least seven hours (420 minutes) had non-zero MIMS
+
+
+# Data overview 
+
+
+
+
+```{r}
+# read in data 
+df_all = readRDS(here::here("data", "covariates_accel_mortality_df.rds"))
+df_all %>% 
+  glimpse() 
+
+```
+
+The entire dataset consists of 19,931 individuals. The varaibles that start with `total` or `peak` denote accelerometery-derived physical activity variables; `total` is mean of the daily total values of that variable, while `peak1` is the mean of the highest value obtained in each day, and `peak30` is the mean of the mean of the 30 highest values obtained in each day.
+
+However, not all of these individuals received accelerometers, had valid accelerometer data, or were 18 years and older. Thus, we will exclude some of these individuals from our analysis. We can generate a CONSORT diagram to summarize the number of individuals excluded for various reasons. 
+
+```{r}
+#| fig-width: 10
+#| fig-height: 10
+# consort diagram
+df_all_temp =
+  df_all %>%
+  mutate(missing_covar = if_any(.cols = c(age_in_years_at_screening, gender,
+                                          race_hispanic_origin, cat_education,
+                                          cat_bmi, chd, chf, heartattack, stroke, cancer,
+                                          bin_diabetes, cat_alcohol, cat_smoke, bin_mobilityproblem,
+                                          general_health_condition, mortstat, permth_exm),
+                                ~is.na(.x)))
+
+r2 = data.table(
+  id = df_all_temp$SEQN,
+  wave = df_all_temp$data_release_cycle,
+  age = df_all_temp$age_in_years_at_screening,
+  has_accel = df_all_temp$has_accel,
+  num_valid_days = df_all_temp$num_valid_days,
+  valid_accel = df_all_temp$valid_accel,
+  inclusion_type = df_all_temp$inclusion_type,
+  missing_covars = df_all_temp$missing_covar
+) %>%
+  mutate(
+    wave = if_else(wave == 7, "2011-2012", "2013-2014"),
+    no_accel = as.factor(if_else(!has_accel, "Did not receive accelerometer", NA_character_)),
+    invalid_accel =
+           case_when(num_valid_days == 0 ~ "Zero valid days",
+                     num_valid_days < 3 ~ "Less than 3 valid days",
+                     TRUE ~ NA_character_),
+         younger_18 = if_else(valid_accel & age < 18, "Age < 18", NA_character_),
+         younger_50 = age < 50,
+         older_79 = age > 79,
+         accel_analysis = valid_accel & age > 18,
+         mort_exc =
+           case_when(valid_accel & age < 50 & age > 18 ~ "Younger than 50",
+                     valid_accel & age >= 80 ~ "Older than 79",
+                     valid_accel & missing_covars ~ "Missing covariates",
+                     TRUE ~ NA_character_),
+         mort_analysis = valid_accel & age >= 50 & age < 80 & !missing_covars)
+
+consort_plot(r2,
+             orders = c(id      = 'NHANES Study Population',
+                        wave = "",
+                        no_accel    = "Excluded",
+                        has_accel    = 'Received accelerometer',
+                        invalid_accel = 'Excluded: insufficient valid wear time',
+                        valid_accel = 'Valid accelerometry',
+                        younger_18 = "Excluded",
+                        accel_analysis = "Accelerometry analysis\nassessed",
+                        mort_exc = 'Excluded sequentially',
+                        mort_analysis = 'Mortality analysis\nassessed'),
+             side_box = c('no_accel', 'invalid_accel', 'younger_18', 'mort_exc'),
+             allocation = 'wave')
+
+
+```
+
+
+## Population characteristics 
+
+For the remainder of the analysis, we exclude individuals younger than 18 and individuals without at least 3 days of valid accelerometry data. 
+
+```{r}
+df_accel =
+  df_all %>%
+  filter(num_valid_days >= 3 & age_in_years_at_screening >= 18)
+```
+
+
+We make a survey-weighted table of population characteristics for these individuals: 
+
+```{r}
+
+labs = c(
+  "SEQN",
+  "Data release cycle",
+  "Interview Examination Status",
+  "Sex",
+  "Age (yrs)",
+  "Age (mos)",
+  "Race/ethnicity",
+  "Six month time period",
+  "Educ. level adults",
+  "Marital status",
+  "2 yr int weight",
+  "2 yr exam weight",
+  "Pseudo PSU",
+  "Psueudo stratum",
+  "Annual HH income",
+  "Weight (kg)",
+  "Height (cm)",
+  "BMI (kg/m2)",
+  "Overweight",
+  "Diabetes orig.",
+  "Diabetes",
+  "Arthritis",
+  "Coronary Heart Failure",
+  "Congenital Heart Disease",
+  "Angina",
+  "Heart attack",
+  "Stroke",
+  "Cancer",
+  colnames(df_all)[29:33],
+  "Alcohol use",
+  "BMI Category",
+  "Smoking status",
+  "Mobility problem",
+  "General health condition",
+  "Eligbility",
+  "Died by 5 years follow up",
+  "COD",
+  "COD Diabetes",
+  "COD Hypertension",
+  "Person-months follow up from interview",
+  "Person-months follow up from exam",
+  "Eligibility category",
+  "COD category",
+  "AC",
+  "MIMS",
+  "Actilife steps",
+  "ADEPT steps",
+  "log10 AC",
+  "log10 MIMS",
+  "Oak steps",
+  "Sc. RF steps",
+  "Sc. SSL steps",
+  "Verisense rev. steps",
+  "Verisense steps",
+  "Peak1 AC",
+  "Peak1 MIMS",
+  "Peak1 Actilife steps",
+  "Peak1 ADEPT steps",
+  "Peak1 log10 AC",
+  "Peak1 log10 MIMS",
+  "Peak1 Oak steps",
+  "Peak1 Sc. RF steps",
+  "Peak1 Sc. SSL steps",
+  "Peak1 Verisense rev. steps",
+  "Peak1 Verisense steps",
+  "Peak30 AC",
+  "Peak30 MIMS",
+  "Peak30 Actilife steps",
+  "Peak30 ADEPT steps",
+  "Peak30 log10 AC",
+  "Peak30 log10 MIMS",
+  "Peak30 Oak steps",
+  "Peak30 Sc. RF steps",
+  "Peak30 Sc. SSL steps",
+  "Peak30 Verisense rev. steps",
+  "Peak30 Verisense steps",
+  "No. valid days",
+  "Received accelerometer",
+  "Valid accelerometry",
+  "Inclusion category",
+  "Education level"
+)
+names(labs) = colnames(df_accel)
+
+df_tab1 =
+  df_all %>%
+  labelled::set_variable_labels(!!!labs)
+
+# survey weighted table
+# question about this!!
+df_svy =
+  df_tab1 %>%
+  filter(has_accel) %>%
+  filter(valid_accel) %>%
+  select(
+    gender,
+    age_in_years_at_screening,
+    race_hispanic_origin,
+    cat_education,
+    cat_bmi,
+    bin_diabetes,
+    chf,
+    chd,
+    stroke,
+    cat_alcohol,
+    cat_smoke,
+    bin_mobilityproblem,
+    general_health_condition,
+    mortstat,
+    data_release_cycle,
+    masked_variance_pseudo_psu,
+    masked_variance_pseudo_stratum,
+    full_sample_2_year_mec_exam_weight
+  )  %>%
+  mutate(WTMEC4YR = full_sample_2_year_mec_exam_weight / 2,
+         WTMEC4YR_norm = WTMEC4YR / mean(WTMEC4YR, na.rm = TRUE)) %>%
+  select(-full_sample_2_year_mec_exam_weight) %>%
+  svydesign(
+    ids = ~ masked_variance_pseudo_psu,
+    weights = ~ WTMEC4YR_norm,
+    strata = ~ masked_variance_pseudo_stratum,
+    data = .,
+    nest = TRUE
+  )
+
+# survey weighted table
+tab = df_svy %>%
+  tbl_svysummary(
+    by = data_release_cycle,
+    include = -c(
+      masked_variance_pseudo_psu,
+      masked_variance_pseudo_stratum,
+      WTMEC4YR,
+      WTMEC4YR_norm
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 2,
+    missing_text = "Missing",
+  ) %>%
+  add_overall() %>%
+  modify_caption("Demographic Characteristics, All Adults") 
+tab
+```
+
+
+## Mean physical activity variables 
+
+We can also make a table of the mean physical activity variables by wave and age group. 
+
+```{r}
+df_adult = df_accel %>%
+  filter(age_in_years_at_screening >= 18) %>%
+  mutate(weight = full_sample_2_year_mec_exam_weight / 2,
+         weight_norm = weight / mean(weight)) %>%
+  mutate(group = "All adults")
+
+df_old = df_accel %>%
+  filter(age_in_years_at_screening >= 50) %>%
+  mutate(weight = full_sample_2_year_mec_exam_weight / 2,
+         weight_norm = weight / mean(weight)) %>%
+  mutate(group = "50+")
+
+
+df = bind_rows(df_adult, df_old)
+
+df = df %>%
+  rename(
+    Verisense = "total_vssteps",
+    "Verisense rev" = "total_vsrevsteps",
+    Oak = "total_oaksteps",
+    ADEPT = "total_adeptsteps",
+    "Stepcount RF" =  "total_scrfsteps",
+    "Stepcount SSL" =  "total_scsslsteps",
+    MIMS = "total_PAXMTSM",
+    Actilife = "total_actisteps",
+    "log10 MIMS"  = "total_log10PAXMTSM",
+    "log10 AC" = "total_log10AC",
+    AC = "total_AC"
+  ) %>%
+  select(!contains("peak"))
+
+df_analysis_svy = survey::svydesign(
+  id = ~ masked_variance_pseudo_psu,
+  strata = ~ masked_variance_pseudo_stratum,
+  weights = ~ weight_norm,
+  data = df,
+  nest = TRUE
+)
+
+
+tab = df_analysis_svy %>%
+  tbl_strata(
+    strata = data_release_cycle,
+    .tbl_fun =
+      ~ .x %>%
+      tbl_svysummary(
+        .,
+        include = c(
+          contains("Actilife"),
+          contains("ADEPT"),
+          contains("Oak"),
+          contains("rf"),
+          contains("ssl"),
+          "Verisense",
+          "Verisense rev",
+          "MIMS",
+          "log10 MIMS",
+          "AC",
+          "log10 AC"
+        ),
+        by = group,
+        statistic = list(
+          all_continuous() ~ "{mean} ({sd})",
+          all_categorical() ~ "{n} ({p}%)"
+        )
+      ),
+    .header = "**Wave {strata}**, N = {n}"
+  ) %>%
+  modify_caption("Physical Activity Mean Totals Stratified by Age and Wave")
+tab
+
+```
+# Physical activity variables 
+
+## Distributions
+
+We plot the distributions of each step and physical activity variable. We plot the 99th percentile with a vertical line to indicate the effect of Winsorizing at the 99th percentile. We choose to use the Winsorized variables in the mortality analysis since the raw distributions are all quite right-skewed. 
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+df_accel_win =
+  df_accel %>%
+  mutate(across(c(contains("total"), contains("peak")), ~winsorize(.x, quantile(.x, probs = c(0, 0.99)))))
+
+
+q99 = 
+  df_accel %>%
+  summarize(across(c(contains("total")), ~quantile(.x, 0.99))) %>% 
+  pivot_longer(cols = contains("total"), values_to = "q")
+
+df_accel %>%
+  select(contains("steps") & contains("total"), SEQN) %>%
+  pivot_longer(cols = -c(SEQN)) %>%
+  left_join(q99, by = "name") %>%
+  mutate(name = factor(name, labels = c("Actilife steps", "ADEPT", "Oak", "Stepcount RF", "Stepcount SSL", "Verisense", "Verisense rev."))) %>%
+  ggplot(aes(x = value / 1000))+
+  geom_density(fill = col1, color = col1) +
+  facet_wrap(.~name, nrow = 1)+
+  geom_vline(aes(xintercept = q/1000))+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid.minor.x = element_blank(),
+        axis.title = element_text(size = 14),
+        title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        strip.text = element_text(size = 12))+
+  labs(x = "Mean Daily Steps x 1000", y = "Density", title = "Distribution of Mean Daily Step Counts",
+       subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
+
+
+df_accel %>%
+  select(!contains("steps") & contains("total"), SEQN) %>%
+  pivot_longer(cols = -c(SEQN)) %>%
+  left_join(q99, by = "name") %>%
+   mutate(name = factor(name, labels = c("AC", "log10 AC", "MIMS", "log10 MIMS"))) %>%
+  ggplot(aes(x = value / 1000))+
+  geom_density(fill = col2, color = col2) +
+  facet_wrap(.~name, nrow = 1, scales = "free")+
+  geom_vline(aes(xintercept = q/1000))+
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid.minor.x = element_blank(),
+        axis.title = element_text(size = 14),
+        title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        strip.text = element_text(size = 12)) +
+  labs(x = "Mean Daily Value x 1000", y = "Density", title = "Distribution of Mean Daily  Counts",
+       subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
+
+
+```
+
+## Means by age 
+
+Next we plot the survey-weighted means by age for each algorithm. First we calculate the survey-weghted means, then smooth the means and confidence intervals with a `loess` smooth. 
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+survey_design =
+  df_accel %>%
+  filter(age_in_years_at_screening >= 18 & age_in_years_at_screening < 80) %>%
+  mutate(weight = full_sample_2_year_mec_exam_weight / 2,
+         weight_norm = weight / mean(weight)) %>%
+  ungroup()  %>%
+  survey::svydesign(
+  id = ~ masked_variance_pseudo_psu,
+  strata = ~ masked_variance_pseudo_stratum,
+  weights = ~ weight_norm,
+  data = .,
+  nest = TRUE
+)
+
+# function to calculate mean estimates by age
+calc_by_age =
+  function(var, df) {
+    # var = "total_oaksteps"
+    formula = as.formula(paste("~", var))
+    total_by_age_gender = svyby(formula,
+                                ~ age_in_years_at_screening,
+                                df,
+                                svymean) %>%
+      rename(mean = contains(var)) %>%
+      mutate(metric = var)
+  }
+
+means_df =
+  map_dfr(.x = df_accel %>% select(contains("total") | contains("peak")) %>% colnames(),
+          .f = calc_by_age, df = survey_design)
+
+# get smooths for means and confidence intervals
+models = means_df %>%
+  mutate(lb = mean - 1.96 * se,
+         ub = mean + 1.96 * se) %>%
+  tidyr::nest(data = -c(metric)) %>%
+  dplyr::mutate(
+    # Perform loess calculation on each group
+    m = purrr::map(data, loess,
+                   formula = mean ~ age_in_years_at_screening, span = .75),
+    # Retrieve the fitted values from each model
+    fitted_mean = purrr::map(m, `[[`, "fitted"),
+    l = purrr::map(data, loess,
+                   formula = lb ~ age_in_years_at_screening, span = .75),
+    # Retrieve the fitted values from each model
+    fitted_lb = purrr::map(l, `[[`, "fitted"),
+    u = purrr::map(data, loess,
+                   formula = ub ~ age_in_years_at_screening, span = .75),
+    # Retrieve the fitted values from each model
+    fitted_ub = purrr::map(u, `[[`, "fitted")
+  )
+
+# Apply fitted y's as a new column
+results = models %>%
+  dplyr::select(-m, -l, -u) %>%
+  tidyr::unnest(cols = c(data, contains("fitted")))
+
+```
+
+Now we can plot the means by age for both totals and peak variables: 
+
+```{r}
+#| fig-width: 10
+#| fig-height: 8
+# name color vector as desired
+names(col_vec) = c(
+  "Actilife",
+  "ADEPT",
+  "Oak",
+  "Stepcount RF",
+  "Stepcount SSL",
+  "Verisense",
+  "Verisense rev."
+)
+results %>%
+  filter(grepl("step", metric) & grepl("total", metric)) %>%
+  mutate(across(contains("fitted"), ~ .x / 1000),
+         metric = factor(
+           metric,
+           levels = c(
+             "total_actisteps",
+             "total_adeptsteps",
+             "total_oaksteps",
+             "total_scrfsteps",
+             "total_scsslsteps",
+             "total_vssteps",
+             "total_vsrevsteps"
+           ),
+           labels = c(
+             "Actilife",
+             "ADEPT",
+             "Oak",
+             "Stepcount RF",
+             "Stepcount SSL",
+             "Verisense",
+             "Verisense rev."
+           )
+         )) %>%
+  ggplot(
+    aes(
+      x = age_in_years_at_screening,
+      y = fitted_mean,
+      ymin = fitted_lb,
+      ymax = fitted_ub,
+      color = metric,
+      fill = metric
+    )
+  ) +
+  facet_grid(. ~ metric) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(alpha = .2, linetype = 0) +
+  scale_fill_manual(values = col_vec, name = "Algorithm") +
+  theme_light() +
+  scale_color_manual(values = col_vec, name = "Algorithm") +
+  geom_hline(aes(yintercept = 10),
+             col = "darkgrey",
+             linetype = "dashed") +
+  theme(
+    legend.position = c(0.65, 0.15),
+    legend.title = element_blank(),
+    strip.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    panel.grid.minor = element_blank(),
+    legend.text = element_text(size = 12)
+  ) +
+  labs(x = "Age (years)", y = "Mean Daily Steps (x1000)", title = "Smoothed Survey Weighted Mean Daily Steps by Age ") +
+  scale_y_continuous(breaks = seq(0, 16, 1)) +
+  scale_x_continuous(breaks = seq(20, 80, 20)) + 
+  guides(fill = guide_legend(nrow = 2, byrow = FALSE),
+         color = guide_legend(nrow = 2, byrow = FALSE))
+
+ results %>%
+  filter(grepl("peak", metric) & grepl("step", metric)) %>%
+  mutate(
+    type = sub("_.*", "", metric),
+    method = sub("^[^_]*_", "", metric),
+    type = factor(type, labels = c("1-minute", "30-minute"))
+  ) %>%
+  filter(grepl("step", metric)) %>%
+  mutate(method = factor(
+    method,
+    levels = c(
+      "actisteps",
+      "adeptsteps",
+      "oaksteps",
+      "scrfsteps",
+      "scsslsteps",
+      "vssteps",
+      "vsrevsteps"
+    ),
+    labels = c(
+      "Actilife",
+      "ADEPT",
+      "Oak",
+      "Stepcount RF",
+      "Stepcount SSL",
+      "Verisense",
+      "Verisense rev."
+    )
+  )) %>%
+  ggplot(
+    aes(
+      x = age_in_years_at_screening,
+      y = fitted_mean,
+      ymin = fitted_lb,
+      ymax = fitted_ub,
+      fill = method,
+      color = method
+    )
+  ) +
+  facet_grid(. ~ type) +
+  geom_line() +
+  geom_ribbon(alpha = 0.2, color = NA) +
+  scale_fill_manual(values = col_vec, name = "Algorithm") +
+  scale_color_manual(values = col_vec, name = "Algorithm") +
+  theme_light() +
+  theme(
+    legend.title = element_blank(),
+    strip.text =  element_text(size = 12),
+    axis.title = element_text(size = 14),
+    title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    panel.grid.minor = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.position = c(0.3, 0.1)
+  ) +
+  labs(x = "Age (years)", y = "Peak Cadence (steps/min)", title = "Smoothed Survey Weighted Peak Cadence by Age") +
+  scale_y_continuous(breaks = seq(20, 120, 10)) +
+  scale_x_continuous(breaks = seq(20, 80, 10)) + 
+  guides(fill = guide_legend(nrow = 2, byrow = FALSE),
+         color = guide_legend(nrow = 2, byrow = FALSE))
+
+```
+
+Finally, we can calculate the \% change per year in the smoothed means and plot: 
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+results %>%
+  filter(grepl("step", metric) & grepl("total", metric)) %>%
+  mutate(metric = factor(
+    metric,
+    levels = c(
+      "total_actisteps",
+      "total_adeptsteps",
+      "total_oaksteps",
+      "total_scrfsteps",
+      "total_scsslsteps",
+      "total_vssteps",
+      "total_vsrevsteps"
+    ),
+    labels = c(
+      "Actilife",
+      "ADEPT",
+      "Oak",
+      "Stepcount RF",
+      "Stepcount SSL",
+      "Verisense",
+      "Verisense rev."
+    )
+  )) %>%
+  group_by(metric) %>%
+  mutate(pct_chg = (fitted_mean - dplyr::lag(fitted_mean)) / dplyr::lag(fitted_mean) *
+           100) %>%
+  ggplot(aes(
+    x = age_in_years_at_screening,
+    y = pct_chg,
+    color = metric,
+    fill = metric
+  )) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(alpha = .2, linetype = 0, aes(ymax = 0, ymin = 0)) +
+  scale_fill_manual(values = col_vec, name = "Algorithm") +
+  theme_light() +
+  scale_color_manual(values = col_vec, name = "Algorithm") +
+  geom_hline(
+    aes(yintercept = 0),
+    col = "darkgrey",
+    linetype = "dashed",
+    linewidth = 1.1
+  ) +
+  theme_light() +
+  labs(x = "Age (years)", y = "% change from previous year", title = "Survey weighted estimated per-year difference in mean daily steps") +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.4, 0.25),
+        axis.title = element_text(size = 14),
+        title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        strip.text = element_text(size = 12),
+        legend.text = element_text(size = 14)) +
+  scale_x_continuous(breaks = seq(20, 80, 10), limits = c(18, 79))+
+  guides(fill = guide_legend(nrow = 2, byrow = FALSE),
+         color = guide_legend(nrow = 2, byrow = FALSE))
+
+```
+
+## Correlations 
+
+We calculate the pairwise Spearman correlations between each step variable and physical activity variable, then plot the correlation matrix. 
+
+```{r}
+cor_mat =
+  df_accel %>% select(contains("total")) %>%
+  select(
+    contains("acti"),
+    contains("adept"),
+    contains("oak"),
+    contains("sc"),
+    contains("vss"),
+    contains("vsr"),
+    total_AC,
+    total_PAXMTSM,
+    total_log10AC,
+    total_log10PAXMTSM
+  ) %>%
+  cor(., use = "complete", method = "spearman")
+
+# correlation p value matrix
+pvals = df_accel %>% select(contains("total")) %>%
+  select(
+    contains("acti"),
+    contains("adept"),
+    contains("oak"),
+    contains("sc"),
+    contains("vss"),
+    contains("vsr"),
+    total_AC,
+    total_PAXMTSM,
+    total_log10AC,
+    total_log10PAXMTSM
+  ) %>%
+  rstatix::cor_pmat(.) %>%
+  select(-rowname) %>%
+  as.matrix()
+
+
+colnames(cor_mat) = rownames(cor_mat) = colnames(pvals) = rownames(pvals) = c(
+  "Actilife steps",
+  "ADEPT",
+  "Oak",
+  "Stepcount RF",
+  "Stepcount SSL",
+  "Verisense",
+  "Verisense rev.",
+  "AC",
+  "MIMS",
+  "log10 AC",
+  "log10 MIMS"
+)
+
+# r for box around correlation
+r = c("ADEPT", "Actilife steps", "Verisense rev.", "Verisense")
+
+corrplot::corrplot(
+  cor_mat,
+  method = "color",
+  type = "upper",
+  col = paletteer_d("colorBlindness::Blue2Orange8Steps"),
+  tl.col = "black",
+  tl.srt = 30,
+  p.mat = pvals,
+  col.lim = c(0.2, 1),
+  sig.level = 0.05,
+  insig = "blank",
+  is.corr = FALSE,
+  addgrid.col = "white",
+  diag = FALSE,
+  addCoef.col = 'black'
+) %>%
+  corrplot::corrRect(namesMat  = r)
+```
+
+We can also plot the mean differences (x1000). 
+
+```{r}
+mean_mat = function(df, abs = FALSE) {
+  # Ensure the input is a dataframe
+  if (!is.data.frame(df)) {
+    stop("Input must be a dataframe")
+  }
+
+  # Check if all columns are numeric
+  if (!all(sapply(df, is.numeric))) {
+    stop("All columns in the dataframe must be numeric")
+  }
+
+  # Get the number of columns
+  num_cols <- ncol(df)
+
+  # Initialize a matrix to store the mean absolute differences
+  mad_matrix <- matrix(NA, nrow = num_cols, ncol = num_cols)
+  rownames(mad_matrix) <- colnames(df)
+  colnames(mad_matrix) <- colnames(df)
+
+  # Calculate the mean absolute difference for each pair of columns
+  for (i in 1:num_cols) {
+    for (j in 1:num_cols) {
+      if (i <= j) {
+        # Calculate mean absolute difference, handling potential NAs
+        if(abs){
+          d = abs(df[, i] - df[, j])
+        }
+        else{
+          d = df[, i] - df[, j]
+        }
+        # Debug output
+        # print(paste("Calculating MAD for columns", colnames(df)[i], "and", colnames(df)[j]))
+        # print(head(abs_diff))
+
+        # Calculate mean
+        # mad_matrix[i, j] <- mean(abs_diff %>% unlist, na.rm = TRUE)
+        mad_matrix[i, j] <- mean(d %>% unlist, na.rm = TRUE)
+        mad_matrix[j, i] <- mad_matrix[i, j]  # Symmetric matrix
+      }
+    }
+  }
+
+  return(mad_matrix)
+}
+diff_mat =
+  df_accel %>% select(contains("total")) %>%
+  select(
+    contains("acti"),
+    contains("adept"),
+    contains("oak"),
+    contains("sc"),
+    contains("vss"),
+    contains("vsr"),
+    total_AC,
+    total_PAXMTSM,
+    total_log10AC,
+    total_log10PAXMTSM
+  ) %>%
+  mean_mat()
+# absolute difference matrix
+abs_diff_mat =
+  df_accel %>% select(contains("total")) %>%
+  select(
+    contains("acti"),
+    contains("adept"),
+    contains("oak"),
+    contains("sc"),
+    contains("vss"),
+    contains("vsr"),
+    total_AC,
+    total_PAXMTSM,
+    total_log10AC,
+    total_log10PAXMTSM
+  ) %>%
+  mean_mat(., abs = TRUE)
+
+# make NA for non-step algos
+diff_mat[, c("total_AC",
+             "total_log10AC",
+             "total_PAXMTSM",
+             "total_log10PAXMTSM")] <- NA
+diff_mat[c("total_AC",
+           "total_log10AC",
+           "total_PAXMTSM",
+           "total_log10PAXMTSM"), ] <- NA
+colnames(diff_mat) = rownames(diff_mat) =  c(
+  "Actilife steps",
+  "ADEPT",
+  "Oak",
+  "Stepcount RF",
+  "Stepcount SSL",
+  "Verisense",
+  "Verisense rev.",
+  "AC",
+  "MIMS",
+  "log10 AC",
+  "log10 MIMS"
+)
+diff_mat = diff_mat / 1000
+corrplot::corrplot(
+  diff_mat,
+  method = "color",
+  type = "lower",
+  col = paletteer_c("grDevices::Purple-Green", 10),
+  col.lim = c(-10, 10),
+  tl.col = "black",
+  tl.srt = 30,
+  insig = "blank",
+  is.corr = FALSE,
+  diag = FALSE,
+  # title = "Mean Difference in Steps (x1000)",
+  addgrid.col = "white",
+  addCoef.col = 'grey50',
+  na.label = "-"
+)
+```
+
+# Mortality prediction
+
+## Single variable
+
+To investigate the association between each step algorithm and mortality, we fit a Cox proportional hazards model with the step algorithm as the only predictor. We also fit these single variable models with traditional predictors of mortality. 
+
+Specifically, we fit the following model: 
+
+$$\text{coxph(Surv(followup\_time, mortality)} \sim \text{predictor})$$
+
+Where $\texttt{followup\_time}$ is the time to death or censoring, $\texttt{mortality}$ is the binary indicator of death, and $\texttt{predictor}$ is the step algorithm or traditional predictor. We perform 10-fold cross validation and estimate the mean concordance over the 10 folds of the model. We then repeat this process 100 times and calculate the mean concordance from the repeated models. The code below illustrates the process, but we have precomputed the results. 
+
+```{r}
+#| echo: true
+#| eval: false 
+# packages for parallel processing; not necessary but will speed up 
+require(future)
+require(furrr)
+
+# make sure dataset meets criteria 
+df_mortality =
+  df_all %>%
+  filter(valid_accel) %>% # valid accelerometry
+  filter(age_in_years_at_screening >= 50 &
+           age_in_years_at_screening < 80) %>%  # age criteria
+  filter(if_all(.cols = c(age_in_years_at_screening, gender,
+                          race_hispanic_origin, cat_education,
+                          cat_bmi, chd, chf, heartattack, stroke, cancer,
+                          bin_diabetes, cat_alcohol, cat_smoke, bin_mobilityproblem,
+                          general_health_condition, mortstat, permth_exm, total_PAXMTSM),
+                ~!is.na(.x))) %>% # no missing data
+  mutate(event_time = permth_exm / 12) # event time in years = person months since exam / 12
+
+# winsorize at 99th percentile 
+df_mortality_win =
+  df_mortality %>%
+  ungroup() %>%
+  mutate(across(c(contains("total"), contains("peak")), ~winsorize(.x, quantile(.x, probs = c(0, 0.99)))))
+
+# concordance is survival metric 
+survival_metrics = metric_set(concordance_survival)
+# proportional hazards model 
+
+survreg_spec = proportional_hazards() %>%
+  set_engine("survival") %>%
+  set_mode("censored regression")
+
+# function to fit model on one variable 
+fit_model = function(var, folds, spec, metrics, mort_df){
+  require(tidyverse); require(tidymodels); require(censored)
+  # create workflow
+  wflow = workflow() %>%
+    add_model(spec) %>%
+    add_variables(outcomes = mort_surv,
+                  predictors = all_of(var)) %>%
+    add_case_weights(case_weights_imp)
+
+  # fit model on folds
+  res = fit_resamples(
+    wflow,
+    resamples = folds,
+    metrics = metrics,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+  # get metrics -- for some reason if you just use collect_metrics it doesn't take into account case weights,
+  # so we write this function to get concordance
+  get_concordance = function(row_num, preds, surv_df){
+    preds %>%
+      slice(row_num) %>%
+      unnest(.predictions) %>%
+      select(.pred_time, .row, mort_surv) %>%
+      left_join(surv_df %>% select(row_ind, case_weights_imp), by = c(".row" = "row_ind")) %>%
+      concordance_survival(truth = mort_surv, estimate = ".pred_time", case_weights = case_weights_imp) %>%
+      pull(.estimate)
+  }
+
+  # get concordance for each fold
+  concordance_vec = map_dbl(.x = 1:nrow(res), .f = get_concordance, preds = res, surv_df = mort_df)
+  rm(res)
+  # return as tibble
+  tibble(concordance = concordance_vec,
+         variable = var)
+}
+
+# all of the variables we want to use in single variable prediction - traditional 
+demo_vars = c(
+  "age_in_years_at_screening",
+  "cat_bmi",
+  "gender",
+  "race_hispanic_origin",
+  "bin_diabetes",
+  "cat_education",
+  "chf",
+  "chd",
+  "heartattack",
+  "stroke",
+  "cancer",
+  "cat_alcohol",
+  "cat_smoke",
+  "bin_mobilityproblem",
+  "general_health_condition")
+
+# pa predictors 
+pa_vars =
+  df_mortality_win %>%
+  select(contains("total"), contains("peak")) %>%
+  colnames()
+
+vars = c(demo_vars, pa_vars)
+
+# normalize weights 
+df = df_mortality_win %>%
+  mutate(weight = full_sample_2_year_mec_exam_weight / 2, weight_norm = weight / mean(weight))
+
+# create a survival object
+surv_df =
+  df %>%
+  mutate(mort_surv = Surv(event_time, mortstat)) %>%
+  mutate(case_weights_imp = hardhat::importance_weights(weight_norm)) %>%
+  mutate(row_ind = row_number())
+
+# set seed and generate 100x 10-folds 
+set.seed(4575)
+folds = vfold_cv(surv_df, v = 10, repeats = 100)
+fname = "metrics_wtd_100_singlevar.rds"
+
+plan(multisession, workers = ncores) # parallel setup 
+# run on all variables 
+results =
+  furrr::future_map_dfr(
+    .x = vars,
+    .f = fit_model,
+    spec = survreg_spec,
+    metrics = survival_metrics,
+    folds = folds,
+    mort_df = surv_df,
+    .options = furrr_options(seed = TRUE, globals = TRUE)
+  )
+
+if(!dir.exists(here::here("results"))){
+  dir.create(here::here("results"))
+}
+# save results 
+saveRDS(results, here::here("results", fname))
+```
+
+We read in the results, and make a table and figure ranking the variables in terms of concordance. 
+
+```{r}
+wt_single = readRDS(here::here("results", "metrics_wtd_100_singlevar.rds")) %>%
+  group_by(variable) %>%
+  mutate(ind = row_number(),
+         rep = floor((row_number()-1)/10)) %>%
+  group_by(variable, rep) %>%
+  summarize(concordance = mean(concordance)) # calculating mean concordance from each 10-fold repeat 
+
+df_mortality =
+  df_all %>%
+  filter(num_valid_days >= 3) %>%
+  filter(age_in_years_at_screening >= 50 &
+           age_in_years_at_screening < 80)
+
+
+# data used for mortality analysis; Winsorized
+df_mortality_win =
+  df_mortality %>%
+  filter(if_all(.cols = c(age_in_years_at_screening, gender,
+                                  race_hispanic_origin, cat_education,
+                                  cat_bmi, chd, chf, heartattack, stroke, cancer,
+                                  bin_diabetes, cat_alcohol, cat_smoke, bin_mobilityproblem,
+                                  general_health_condition, mortstat, permth_exm),
+                ~!is.na(.x))) %>%
+  mutate(event_time = permth_exm / 12) %>%
+  ungroup() %>%
+  mutate(across(c(contains("total"), contains("peak")), ~winsorize(.x, quantile(.x, probs = c(0, 0.99)))))
+
+vlabs = c(
+  "Age (yrs)",
+  "Diabetes",
+  "Mobility problem",
+  "Cancer",
+  "Alcohol use",
+  "BMI Category",
+  "Education category",
+  "Smoking status",
+  "Congenital Heart Disease",
+  "Coronary Heart Failure",
+  "Gender",
+  "General health condition",
+  "Heart attack",
+  "Peak1 AC",
+  "Peak1 Actilife steps",
+  "Peak1 ADEPT steps",
+  "Peak1 log10 AC",
+  "Peak1 log10 MIMS",
+  "Peak1 Oak steps",
+  "Peak1 MIMS",
+  "Peak1 Stepcount RF steps",
+  "Peak1 Stepcount SSL steps",
+  "Peak1 Verisense rev. steps",
+  "Peak1 Verisense steps",
+  "Peak30 AC",
+  "Peak30 Actilife steps",
+  "Peak30 ADEPT steps",
+  "Peak30 log10 AC",
+  "Peak30 log10 MIMS",
+  "Peak30 Oak steps",
+  "Peak30 MIMS",
+  "Peak30 Stepcount RF steps",
+  "Peak30 Stepcount SSL steps",
+  "Peak30 Verisense rev. steps",
+  "Peak30 Verisense steps",
+  "Race/ethnicity",
+  "Stroke",
+  "AC",
+  "Actilife steps",
+  "ADEPT steps",
+  "log10 AC",
+  "log10 MIMS",
+  "Oak steps",
+  "MIMS",
+  "Stepcount RF steps",
+  "Stepcount SSL steps",
+  "Verisense rev. steps",
+  "Verisense steps"
+)
+
+data_summary = wt_single %>%
+  group_by(variable) %>%
+  summarize(across(concordance, list(
+    mean = ~ mean(.x), se = ~ sd(.x) / sqrt(n())
+  ))) %>%
+  mutate(variable_fac = factor(
+    variable,
+    labels = vlabs
+  )) %>%
+  filter(!grepl("peak", variable))
+
+df_means =
+  df_mortality_win %>%
+  group_by(mortstat) %>%
+  summarize(across(c(contains("total"), contains("peak"), contains("age")), ~ mean(.x)),
+            across(c(bin_mobilityproblem, cancer, stroke, heartattack, chd, chf, bin_diabetes), ~sum(.x)/n()*100),
+            gender = sum(gender == "Female")/n()*100) %>%
+  pivot_longer(cols = -mortstat) %>%
+  pivot_wider(names_from = mortstat,
+              values_from = value,
+              names_prefix = 'died_') %>%
+  rename(variable = name)
+
+# get the best variable based on concodance
+best_var = data_summary %>%
+  arrange(desc(concordance_mean)) %>%
+  slice(1) %>%
+  pull(variable)
+
+best_var_vec = wt_single %>%
+  filter(variable == best_var) %>%
+  pull(concordance)
+
+t_tests = wt_single %>%
+  group_by(variable) %>%
+  filter(variable != best_var) %>%
+  nest() %>%
+  mutate(t_test = map(
+    data,
+    ~ t.test(
+      .x$concordance,
+      best_var_vec,
+      var.eq = FALSE,
+      paired = FALSE,
+      alternative = "less"
+    )
+  ),
+  res = map(t_test, tidy)) %>%
+  unnest(res) %>%
+  ungroup() %>%
+  select(variable, p.value)
+
+# join t tests with summary data and make table
+tab = data_summary %>%
+  left_join(t_tests) %>%
+  left_join(df_means) %>%
+  arrange(desc(concordance_mean)) %>%
+  mutate(
+    variable_fac = forcats::fct_reorder(variable_fac, concordance_mean),
+    lb = concordance_mean - 1.96 * concordance_se,
+    ub = concordance_mean + 1.96 * concordance_se,
+    ci2 = sprintf("%0.3f", round(concordance_mean, 3)),
+    ci = paste0(
+      sprintf("%0.3f", round(concordance_mean, 3)),
+      " (",
+      sprintf("%0.3f", round(lb, 3)),
+      ", ",
+      sprintf("%0.3f", round(ub, 3)),
+      ")"
+    )
+  ) %>%
+  select(variable_fac,
+         ci2,
+         # ci,
+         # p.value,
+         total_alive = died_0,
+         total_deceased = died_1) %>%
+  # mutate(pvalue = style_pvalue(p.value, digits = 3)) %>%
+  # mutate(pvalue = ifelse(is.na(pvalue), "---", pvalue),
+  #        across(starts_with("mean"), ~ if_else(is.na(.x), "---", as.character(round(
+  #          .x, 0
+  #        ))))) %>%
+  rename(
+    Variable = variable_fac,
+    "Mean" = ci2,
+    # "Mean (95% CI)" = ci,
+    # "p-value" = pvalue,
+    "Mean value among alive" = total_alive,
+    "Mean value among deceased" = total_deceased
+  ) %>%
+  gt::gt() %>%
+  gt::fmt_number(columns = starts_with("mean"), decimals = 0) %>%
+  # gt::tab_style(
+  #   style = list(cell_text(weight = "bold")),
+  #   locations = cells_body(columns = everything(), rows = p.value > 0.05 |
+  #                            is.na(p.value))
+  # ) %>%
+  # gt::cols_hide(p.value) %>%
+  tab_header(title = "100x 10-fold Cross-Validated Single Variable Concordance", subtitle = "") %>%
+  # tab_footnote(footnote = "p-value for one sided t-test comparing variable to variable with higest mean concordance",
+  #              locations = cells_column_labels(columns = "p-value")) %>%
+  cols_align(columns = everything(), align = "left"); tab
+
+
+```
+
+```{r}
+#| fig-width: 10
+var_labels =
+  tibble(
+    names =
+      unique(wt_single$variable),
+    labels = c(
+      "Age at screening",
+      "Diabetes",
+      "Mobility problem",
+      "Cancer",
+      "Alcohol use",
+      "BMI Category",
+      "Education level",
+      "Smoking status",
+      "CHF",
+      "CHD",
+      "Gender",
+      "Self-reported health",
+      "Heart attack",
+      "Peak1 AC",
+      "Peak1 MIMS",
+      "Peak1 Actilife steps",
+      "Peak1 ADEPT steps",
+      "Peak1 log10 AC",
+      "Peak1 log10 MIMS",
+      "Peak1 Oak steps",
+      "Peak1 Stepcount RF steps",
+      "Peak1 Stepcount SSL steps",
+      "Peak1 Verisense rev. steps",
+      "Peak1 Verisense steps",
+      "Peak30 AC",
+      "Peak30 MIMS",
+      "Peak30 Actilife steps",
+      "Peak30 ADEPT steps",
+      "Peak30 log10 AC",
+      "Peak30 log10 MIMS",
+      "Peak30 Oak steps",
+      "Peak30 Stepcount RF steps",
+      "Peak30 Stepcount SSL steps",
+      "Peak30 Verisense rev. steps",
+      "Peak30 Verisense steps",
+      "Race/ethnicity",
+      "Stroke",
+      "AC",
+      "MIMS",
+      "Actilife steps",
+      "ADEPT steps",
+      "log10 AC",
+      "log10 MIMS",
+      "Oak steps",
+      "Stepcount RF steps",
+      "Stepcount SSL steps",
+      "Verisense rev. steps",
+      "Verisense steps"
+    )
+  )
+
+
+wt_single %>%
+  filter(!grepl("peak", variable)) %>%
+  mutate(var_group = case_when(
+    grepl("steps", variable) ~ "Step variable",
+    grepl("total", variable) ~ "Non-step accelerometry variable",
+    TRUE ~ "Non-accelerometry variable"
+  ),
+  var_group = factor(var_group, levels = c("Step variable", "Non-step accelerometry variable", "Non-accelerometry variable"))) %>%
+  group_by(variable, var_group) %>%
+  summarize(mean = mean(concordance),
+            sd = sd(concordance),
+            se = sd(concordance)/sqrt(n())) %>%
+  mutate(ci_low = mean - 1.96*se,
+         ci_high = mean + 1.96*se) %>%
+  ungroup() %>%
+  left_join(var_labels, by = c("variable" = "names")) %>%
+  mutate(labels = factor(labels),
+         labels = fct_reorder(labels, mean)) %>%
+  ggplot(aes(y = labels, x = mean, xmin = ci_low, xmax = ci_high, color = var_group, shape = var_group))+
+  geom_point(size = 3) +
+  # geom_errorbarh(height = .3) +
+  theme_bw() +
+  # scale_color_manual(values = c("#CC79A7FF", "#009E73FF", "#0072B2FF"), name = "")+
+  scale_color_manual(values = c("#FF6DB6", "#009292", "#006DDB"), name = "")+ # colors from paletteer_d("colorBlindness::paletteMartin")
+  scale_shape_manual(values = c(8, 17, 16), name = "")+
+  scale_x_continuous(limits=c(0.5, 0.75), breaks=seq(0.5, 0.75, .05))+
+  theme(legend.position = c(.35, .75),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        axis.text.y = element_text(size = 12),
+        strip.text = element_text(size = 14))+
+  labs(x = "Mean 100-times repeated 10-fold Cross-Validated Survey-Weighted Concordance", y = "")
+
+
+
+```
+
+We can also compare the concordance for the peak variables vs. the total variables.  
+
+```{r}
+#| fig-width: 10
+wt_single %>%
+  filter(grepl("peak", variable) | grepl("steps", variable)) %>%
+  mutate(var_group = factor(case_when(
+    grepl("peak1", variable) ~ "Peak 1-min variable",
+    grepl("peak30", variable) ~ "Peak 30-min variable",
+    TRUE ~ "Mean daily total variable"
+  ), levels = c("Peak 1-min variable", "Peak 30-min variable", "Mean daily total variable"))) %>%
+  group_by(variable, var_group) %>%
+  summarize(mean = mean(concordance),
+            sd = sd(concordance),
+            se = sd(concordance)/sqrt(n())) %>%
+  # mutate(ci_low = mean - 1.96*se,
+  #        ci_high = mean + 1.96*se) %>%
+  ungroup() %>%
+  left_join(var_labels, by = c("variable" = "names")) %>%
+  mutate(labels = factor(labels),
+         labels = fct_reorder(labels, mean)) %>%
+  # ggplot(aes(y = labels, x = mean, xmin = ci_low, xmax = ci_high, color = var_group, shape = var_group))+
+  ggplot(aes(y = labels, x = mean, color = var_group, shape = var_group))+
+  geom_point(size = 3) +
+  # geom_errorbarh() +
+  theme_bw() +
+  scale_shape_manual(values = c(3,15,18), name = "") + 
+  # scale_shape_manual(values = c(1, 16, 17), name = "")+
+  # scale_color_manual(values = c("#E69F00FF", "#D55E00FF", "#56B4E9FF"), name = "")+
+  scale_color_manual(values = c("#FF7F00", "#FFBF7F", "#654CFF"), name = "")+ # from paletteer_d("colorBlindness::PairedColor12Steps")
+  scale_x_continuous(limits=c(0.687, 0.738), breaks=seq(0.675, 0.775, .0125))+
+  theme(legend.position = c(.3, .7),
+        legend.title = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.title= element_text(size = 14),
+        legend.text = element_text(size = 14),
+        strip.text = element_text(size = 14))+
+  labs(x = "Mean 100-times repeated 10-fold Cross-Validated Survey-Weighted Concordance", y = "")
+
+
+```
+
+## Multivariable 
+
+For the multivariable analysis, we fit the four Cox proportional hazards models with the following predictors:
+
+1. Traditional predictors only (age, mobility problem, self reported health, diabetes, smoking status, education, gender, CHF, CHD, heart attack, stroke, cancer, alcohol use, BMI category, race/ethnicity)
+2. Traditional predictors \& MIMS
+3. Traditional predictors \& steps from stepcount RF
+4. Traditional predictors \& steps from stepcount RF \& MIMS 
+
+We use the same 100-times repeated 10-fold cross validation as before. Below is the code to run the multivariable models for a large combination of models; again, we prerun the code but include below. 
+
+```{r}
+#| echo: true
+#| eval: false 
+
+require(future)
+require(furrr)
+ncores = parallelly::availableCores() - 1
+
+df_mortality =
+  df_all %>%
+  filter(valid_accel) %>% # valid accelerometry
+  filter(age_in_years_at_screening >= 50 &
+           age_in_years_at_screening < 80) %>%  # age criteria
+  filter(if_all(.cols = c(age_in_years_at_screening, gender,
+                          race_hispanic_origin, cat_education,
+                          cat_bmi, chd, chf, heartattack, stroke, cancer,
+                          bin_diabetes, cat_alcohol, cat_smoke, bin_mobilityproblem,
+                          general_health_condition, mortstat, permth_exm, total_PAXMTSM),
+                ~!is.na(.x))) %>% # no missing data
+  mutate(event_time = permth_exm / 12) # event time in years = person months since exam / 12
+
+df_mortality_win =
+  df_mortality %>%
+  ungroup() %>%
+  mutate(across(c(contains("total"), contains("peak")), ~winsorize(.x, quantile(.x, probs = c(0, 0.99)))))
+
+
+survival_metrics = metric_set(concordance_survival)
+
+survreg_spec = proportional_hazards() %>%
+  set_engine("survival") %>%
+  set_mode("censored regression")
+
+
+# create four workflows: demo only, demo + MIMS, demo + steps, demo + MIMS + steps
+# for each model, add case weights
+demo_vars = c("age_in_years_at_screening", "cat_bmi", "gender",
+              "race_hispanic_origin", "bin_diabetes", "chf", "general_health_condition",
+              "chd", "heartattack", "cancer", "stroke", "cat_alcohol", "cat_smoke",
+              "bin_mobilityproblem", "cat_education")
+fit_model = function(pred_vars, model_name, folds, spec, metrics, mort_df){
+  require(tidyverse); require(tidymodels); require(censored)
+  wflow =  workflow() %>%
+    add_model(spec) %>%
+    add_variables(outcomes = mort_surv,
+                  predictors = all_of(pred_vars)) %>%
+    # predictors = c(all_of(demo_vars), all_of(add_vars))) %>%
+    add_case_weights(case_weights_imp)
+
+  res = fit_resamples(
+    wflow,
+    resamples = folds,
+    metrics = metrics,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+  get_concordance = function(row_num, preds, surv_df){
+    preds %>%
+      slice(row_num) %>%
+      unnest(.predictions) %>%
+      select(.pred_time, .row, mort_surv) %>%
+      left_join(surv_df %>% select(row_ind, case_weights_imp), by = c(".row" = "row_ind")) %>%
+      concordance_survival(truth = mort_surv, estimate = ".pred_time", case_weights = case_weights_imp) %>%
+      pull(.estimate)
+  }
+
+  concordance_vec = map_dbl(.x = 1:nrow(res), .f = get_concordance, preds = res, surv_df = mort_df)
+  rm(res)
+
+  tibble(concordance = concordance_vec,
+         model = model_name)
+}
+
+
+add_vars_list = as.list(c(df_mortality_win %>%
+                            select(contains("total")) %>% colnames()))
+step_vars = df_mortality_win %>% select(contains("steps") & contains("total")) %>% colnames()
+step_MIMS_list = lapply(step_vars, function(x){c(x, "total_PAXMTSM")})
+step_lMIMS_list = lapply(step_vars, function(x){c(x, "total_log10PAXMTSM")})
+
+step_AC_list = lapply(step_vars, function(x){c(x, "total_AC")})
+step_lAC_list = lapply(step_vars, function(x){c(x, "total_log10AC")})
+
+all_list = c(add_vars_list, step_MIMS_list,step_lMIMS_list,step_lAC_list, step_AC_list)
+preds_list = lapply(all_list, function(x){c(x, demo_vars)})
+preds_list[[length(preds_list) + 1]] = demo_vars
+model_names =
+  map(all_list, .f = function(x){paste(sub(".*total\\_", "", x), collapse = "+")})
+model_names[[length(model_names) + 1]] = "Demo only"
+
+df = df_mortality_win %>%
+  mutate(weight = full_sample_2_year_mec_exam_weight / 2, weight_norm = weight / mean(weight))
+# create a survival object
+surv_df =
+  df %>%
+  mutate(mort_surv = Surv(event_time, mortstat)) %>%
+  mutate(case_weights_imp = hardhat::importance_weights(weight_norm)) %>%
+  mutate(row_ind = row_number())
+set.seed(4575)
+folds = vfold_cv(surv_df, v = 10, repeats = 100)
+fname = "metrics_wtd_100.rds"
+
+
+plan(multisession, workers = ncores)
+results =
+  furrr::future_map2_dfr(
+    .x = preds_list,
+    .y = model_names,
+    .f = fit_model,
+    spec = survreg_spec,
+    metrics = survival_metrics,
+    folds = folds,
+    mort_df = surv_df,
+    .options = furrr_options(seed = TRUE, globals = TRUE)
+  )
+
+saveRDS(
+  results,
+  here::here("results", fname)
+)
+
+
+```
+
+We can make a table comparing the four models as follows: 
+
+```{r}
+# read in results
+wt_all = readRDS(here::here("results", "metrics_wtd_100.rds")) %>%
+  group_by(model) %>%
+  mutate(ind = row_number(),
+         rep = floor((row_number()-1)/10)) %>%
+  group_by(model, rep) %>%
+  summarize(concordance = mean(concordance)) %>%
+  ungroup()
+
+wt_small =
+  wt_all %>%
+  filter(model %in% c("Demo only", "scrfsteps+PAXMTSM", "scrfsteps", "PAXMTSM"))
+
+summary =
+  wt_small %>%
+  group_by(model) %>%
+  summarize(across(concordance, list(mean = ~mean(.x),
+                                     se = ~sd(.x)/sqrt(n())))) %>%
+  mutate(model_fac = factor(model, labels = c("Traditional predictors only",
+                                              "Traditional predictors + MIMS",
+                                              "Traditional predictors + SCRF steps",
+                                              "Traditional predictors + SCRF steps + MIMS")))
+# get coefficients from steps model
+coef_scrf =
+  df_mortality_win %>%
+  mutate(
+    weight = full_sample_2_year_mec_exam_weight / 2,
+    weight_norm = weight / mean(weight)) %>%
+  coxph(Surv(event_time, mortstat) ~ total_scrfsteps +
+          age_in_years_at_screening + cat_education + bin_diabetes + cat_bmi +
+          race_hispanic_origin + chf + general_health_condition + chd +
+          heartattack + cancer + stroke + cat_alcohol + cat_smoke +
+          bin_mobilityproblem, weights = weight_norm, data  = .) %>%
+  tidy() %>%
+  select(term, estimate, std.error, robust.se, p.value) %>%
+  filter(grepl("steps", term)) %>%
+  mutate(hr = exp(estimate * 500),
+         lb = exp((estimate - 1.96 * std.error) * 500),
+         ub = exp((estimate + 1.96 * std.error) * 500),
+         model = "scrfsteps")
+# coef from MIMS model
+coef_mims =
+  df_mortality_win %>%
+  mutate(
+    weight = full_sample_2_year_mec_exam_weight / 2,
+    weight_norm = weight / mean(weight)) %>%
+  coxph(Surv(event_time, mortstat) ~ total_PAXMTSM + total_scrfsteps +
+          age_in_years_at_screening + cat_education + bin_diabetes + cat_bmi +
+          race_hispanic_origin + chf + general_health_condition + chd +
+          heartattack + cancer + stroke + cat_alcohol + cat_smoke +
+          bin_mobilityproblem, weights = weight_norm, data  = .) %>%
+  tidy() %>%
+  select(term, estimate, std.error, robust.se, p.value) %>%
+  filter(grepl("steps", term)) %>%
+  mutate(hr = exp(estimate * 500),
+         lb = exp((estimate - 1.96 * std.error) * 500),
+         ub = exp((estimate + 1.96 * std.error) * 500),
+         model = "scrfsteps+PAXMTSM")
+
+coefs = bind_rows(coef_scrf, coef_mims)
+# print summary
+tab = summary %>%
+  left_join(coefs)  %>%
+  mutate(conc_lb = concordance_mean - 1.96 * concordance_se,
+         conc_ub = concordance_mean + 1.96 * concordance_se,
+          conc_ci2 = sprintf("%0.3f",round(concordance_mean, 3)),  
+         conc_ci = paste0(sprintf("%0.3f",round(concordance_mean, 3)),
+                          " (", sprintf("%0.3f",round(conc_lb, 3)), ", ", sprintf("%0.3f",round(conc_ub, 3)), ")"),
+         hr_ci = case_when(!is.na(hr) ~ paste0(sprintf("%0.3f",round(hr, 3)),
+                                               " (", sprintf("%0.3f",round(lb, 3)), ", ", sprintf("%0.3f",round(ub, 3)), ")"),
+                           TRUE ~ "---"),
+         p.value = if_else(is.na(p.value), "---", format.pval(p.value, digits = 3))) %>%
+  select(model_fac, hr_ci,p.value, conc_ci, conc_ci2) %>%
+  rename(Model = model_fac,
+         "Steps HR" = hr_ci,
+         "Steps p-value" = p.value,
+         "Model concordance" = conc_ci2) %>%
+  gt::gt() %>%
+  # gt::fmt_number(columns = starts_with("mean"), decimals = 0) %>%
+  tab_header(title = "Multivariable Model Comparison") %>%
+  cols_align(columns = everything(), align = "left"); tab
+
+
+
+```
+
+We can also make a table of the hazard ratios associated with an (a) increase of 500 steps and (b) increase of 1 standard deviation in steps. 
+
+```{r}
+# get PA variables
+pa_vars = df_mortality_win %>%
+  select(contains("total") & contains("steps")) %>%
+  colnames()
+
+# create DF that is scaled steps
+df_mortality_win_scaled =
+  df_mortality_win %>%
+  mutate(across(c(contains("total")), ~scale(.x)))
+
+# get standard deviations
+sds =
+  df_mortality_win %>%
+  summarize(across(c(contains("total")), ~sd(.x)/1000)) %>%
+  pivot_longer(cols = contains("total")) %>%
+  mutate(value = round(value, digits = 1),
+         value = sprintf("%.1f",value)) %>%
+  left_join(var_labels, by = c("name" = "names"))
+
+# function to fit model on all data w/ all covariates
+fit_model = function(var, df) {
+  df = df %>%
+    mutate(weight = full_sample_2_year_mec_exam_weight / 2, 
+           weight_norm = weight / mean(weight))
+  formula = as.formula(
+    paste0(
+      "Surv(event_time, mortstat) ~",
+      var,
+      "+
+      age_in_years_at_screening + cat_education + bin_diabetes + cat_bmi +
+      race_hispanic_origin +
+      gender +
+      cat_bmi +
+      cat_education +
+      chf +
+      chd +
+      heartattack +
+      stroke +
+      cancer +
+      bin_diabetes +
+      cat_alcohol +
+      cat_smoke +
+      bin_mobilityproblem +
+      general_health_condition"
+    )
+  )
+  coxph(formula, data = df, weights = weight_norm) %>%
+    tidy() %>%
+    filter(grepl(var, term))
+}
+
+steps_res =
+  map_dfr(.x = pa_vars,
+          .f = fit_model,
+          df = df_mortality_win) %>%
+  mutate(hr = exp(estimate * 500),
+         ci_low = exp(500*(estimate - (1.96 * std.error))),
+         ci_high = exp(500*(estimate + (1.96 * std.error))))
+
+steps_res_scaled =
+  map_dfr(.x = c(pa_vars, "total_PAXMTSM", "total_AC"),
+          .f = fit_model,
+          df = df_mortality_win_scaled) %>%
+  mutate(hr = exp(estimate),
+         ci_low = exp(estimate - (1.96 * std.error)),
+         ci_high = exp(estimate + (1.96 * std.error))) %>%
+  left_join(var_labels, by = c("term" = "names"))
+
+
+tab = steps_res %>%
+  select(term, hr, p.value, ci_low, ci_high) %>%
+  mutate(type = "raw") %>%
+  bind_rows(
+    steps_res_scaled %>% select(term, hr, p.value, ci_low, ci_high) %>% mutate(type = "scaled")
+  ) %>%
+  pivot_wider(names_from = type, values_from = -term) %>%
+  filter(grepl("step", term)) %>%
+  left_join(sds, by = c("term" = "name")) %>%
+  arrange(labels) %>%
+  mutate(
+    variable_fac = forcats::fct_reorder(term, hr_scaled, mean),
+    ci_raw = paste0(
+      sprintf("%0.2f", round(hr_raw, 2)),
+      " (",
+      sprintf("%0.2f", round(ci_low_raw, 2)),
+      ", ",
+      sprintf("%0.2f", round(ci_high_raw, 2)),
+      ")"
+    ),
+    ci_sc = paste0(
+      sprintf("%0.2f", round(hr_scaled, 2)),
+      " (",
+      sprintf("%0.2f", round(ci_low_scaled, 2)),
+      ", ",
+      sprintf("%0.2f", round(ci_high_scaled, 2)),
+      ")"
+    )
+  ) %>%
+  select(
+    "Variable" = labels,
+    "HR, Raw" = ci_raw,
+    "HR, Scaled" = ci_sc,
+    "SD" = value
+  ) %>%
+  gt::gt() %>%
+  cols_align(columns = everything(), align = "left") %>% 
+  gt::tab_header(title = "Hazard Ratios for 500 Step Increase and 1 Standard Deviation Increase in Steps")
+tab
+
+
+```
+
+

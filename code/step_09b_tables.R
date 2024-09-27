@@ -74,6 +74,14 @@ df_all_temp =
                                           general_health_condition, mortstat, permth_exm),
                                 ~is.na(.x)))
 
+# get numbers alive/died
+
+df_mortality_win %>%
+  group_by(mortstat) %>%
+  summarize(n = n())
+median(df_mortality_win$permth_exm)
+mean(df_mortality_win$permth_exm)
+
 ######## CONSORT
 r2 = data.table(
   id = df_all_temp$SEQN,
@@ -83,7 +91,8 @@ r2 = data.table(
   num_valid_days = df_all_temp$num_valid_days,
   valid_accel = df_all_temp$valid_accel,
   inclusion_type = df_all_temp$inclusion_type,
-  missing_covars = df_all_temp$missing_covar
+  missing_covars = df_all_temp$missing_covar,
+  mortstat = df_all_temp$mortstat
 ) %>%
   mutate(
     wave = if_else(wave == 7, "2011-2012", "2013-2014"),
@@ -101,7 +110,15 @@ r2 = data.table(
                      valid_accel & age >= 80 ~ "Older than 79",
                      valid_accel & missing_covars ~ "Missing covariates",
                      TRUE ~ NA_character_),
+    mort_exc2 =
+      case_when(valid_accel & age < 50 & age > 18 ~ "Younger than 50",
+                valid_accel & age >= 80 ~ "Older than 79",
+                valid_accel & missing_covars ~ "Missing covariates",
+                valid_accel & mortstat == 1 ~ "Died by end of follow up",
+                TRUE ~ NA_character_),
          mort_analysis = valid_accel & age >= 50 & age < 80 & !missing_covars)
+
+
 
 consort_plot(r2,
              orders = c(id      = 'NHANES Study Population',
@@ -114,9 +131,11 @@ consort_plot(r2,
                         accel_analysis = "Accelerometry analysis\nassessed",
                         mort_exc = 'Excluded sequentially',
                         mort_analysis = 'Mortality analysis\nassessed'),
+                        # mort_analysis = paste('Mortality analysis\nassessed\nDeaths:', sum(r2$num_died))),  # Add death count),
              side_box = c('no_accel', 'invalid_accel', 'younger_18', 'mort_exc'),
              allocation = 'wave')
              # labels=c('1'='Screening', '3'='Consent', '4'='Randomization', '6'='Follow-up'))
+
 
 ########## table 1
 # nice labels for table
@@ -157,7 +176,6 @@ df_tab1 =
   labelled::set_variable_labels(!!!labs)
 
 # survey weighted table
-# question about this!!
 df_svy =
   df_tab1 %>%
   filter(has_accel) %>%
@@ -229,7 +247,6 @@ df_unwt =
     mortstat,
     data_release_cycle)
 
-# survey weighted table
 df_unwt %>%
   tbl_summary(
     by = data_release_cycle,
@@ -243,6 +260,111 @@ df_unwt %>%
   add_overall() %>%
   modify_caption("Demographic Characteristics, All Adults")
 
+
+### table for supplement - only individuals included in mortality analysis
+df_tab1 =
+  df_all %>%
+  labelled::set_variable_labels(!!!labs)
+df_svy =
+  df_tab1 %>%
+  filter(has_accel) %>%
+  filter(valid_accel) %>%
+  filter(age_in_years_at_screening >= 50 & age_in_years_at_screening < 80) %>%
+  select(
+    gender,
+    age_in_years_at_screening,
+    race_hispanic_origin,
+    cat_education,
+    cat_bmi,
+    bin_diabetes,
+    chf,
+    chd,
+    stroke,
+    cat_alcohol,
+    cat_smoke,
+    bin_mobilityproblem,
+    general_health_condition,
+    mortstat,
+    data_release_cycle,
+    masked_variance_pseudo_psu, masked_variance_pseudo_stratum,
+    full_sample_2_year_mec_exam_weight
+  )  %>%
+  mutate(WTMEC4YR = full_sample_2_year_mec_exam_weight/2,
+         WTMEC4YR_norm = WTMEC4YR/mean(WTMEC4YR, na.rm = TRUE)) %>%
+  select(-full_sample_2_year_mec_exam_weight) %>%
+  svydesign(ids = ~masked_variance_pseudo_psu, weights = ~WTMEC4YR_norm,
+            strata = ~masked_variance_pseudo_stratum, data=., nest=TRUE)
+
+# survey weighted table
+tab = df_svy %>%
+  tbl_svysummary(
+    by = data_release_cycle,
+    include = -c(masked_variance_pseudo_psu, masked_variance_pseudo_stratum, WTMEC4YR,
+                 WTMEC4YR_norm),
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 2,
+    missing_text = "Missing",
+  ); tab
+
+# survey weighted table, for latex
+tab %>%
+  kableExtra::kbl("latex", booktabs = TRUE)
+
+tab = df_svy %>%
+  tbl_svysummary(
+    include = -c(masked_variance_pseudo_psu, masked_variance_pseudo_stratum, WTMEC4YR,
+                 WTMEC4YR_norm),
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 2,
+    missing_text = "Missing",
+  ); tab
+
+tab %>%
+  kableExtra::kbl("latex", booktabs = TRUE)
+
+# supplement - non survey weighted mortality characteristics
+df_unwt =
+  df_tab1 %>%
+  filter(has_accel) %>%
+  filter(valid_accel) %>%
+  filter(age_in_years_at_screening < 80 & age_in_years_at_screening >= 50) %>%
+  select(
+    gender,
+    age_in_years_at_screening,
+    race_hispanic_origin,
+    cat_education,
+    cat_bmi,
+    bin_diabetes,
+    chf,
+    chd,
+    stroke,
+    cat_alcohol,
+    cat_smoke,
+    bin_mobilityproblem,
+    general_health_condition,
+    mortstat,
+    data_release_cycle)
+
+tab = df_unwt %>%
+  tbl_summary(
+    by = data_release_cycle,
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 2,
+    missing_text = "Missing",
+  ) %>%
+  add_overall() %>%
+  modify_caption("Demographic Characteristics, All Adults"); tab
+tab %>%
+  kableExtra::kbl("latex", booktabs = TRUE)
 
 ###### table 2: means/sds of PA variables
 
@@ -343,6 +465,19 @@ df %>%
   ) %>%
   modify_caption("Physical Activity Mean Totals Stratified by Age and Wave - Unweighted")
 
+
+# diffs
+
+get_pct_diff = function(x, y){
+  abs(x-y)/(mean(c(x,y)))*100
+}
+
+x = c(11195, 12169, 2342, 2659, 10254, 11794, 9888,11509, 8358, 9144, 8337, 9497, 7532, 9102,
+      12435, 13572, 960, 998, 2333927, 2573262, 2878, 2955)
+y = c(10850, 11902,2151,2453, 9733,11381, 9502, 11263,8027,8846, 7974,9163,  7122, 8725,12243, 13467,952,994, 2291942,2549846, 2847, 2933)
+map2(.x = x, .y = y, .f = get_pct_diff)
+get_pct_diff(11195, 12169)
+
 ### univariate model summaries
 # label variables
 vlabs = c(
@@ -410,7 +545,9 @@ data_summary = wt_single %>%
 df_means =
   df_mortality_win %>%
   group_by(mortstat) %>%
-  summarize(across(c(contains("total"), contains("peak")), ~ mean(.x))) %>%
+  summarize(across(c(contains("total"), contains("peak"), contains("age")), ~ mean(.x)),
+            across(c(bin_mobilityproblem, cancer, stroke, heartattack, chd, chf, bin_diabetes), ~sum(.x)/n()*100),
+            gender = sum(gender == "Female")/n()*100) %>%
   pivot_longer(cols = -mortstat) %>%
   pivot_wider(names_from = mortstat,
               values_from = value,
@@ -494,10 +631,101 @@ tab = data_summary %>%
                locations = cells_column_labels(columns = "p-value")) %>%
   cols_align(columns = everything(), align = "left"); tab
 
+# without p value
+tab = data_summary %>%
+  left_join(t_tests) %>%
+  left_join(df_means) %>%
+  arrange(desc(concordance_mean)) %>%
+  mutate(
+    variable_fac = forcats::fct_reorder(variable_fac, concordance_mean),
+    lb = concordance_mean - 1.96 * concordance_se,
+    ub = concordance_mean + 1.96 * concordance_se,
+    ci = sprintf("%0.3f", round(concordance_mean, 3))) %>%
+  select(variable_fac,
+         ci,
+         total_alive = died_0,
+         total_deceased = died_1) %>%
+  rename(
+    Variable = variable_fac,
+    "Mean (95% CI)" = ci,
+    "Mean value among alive" = total_alive,
+    "Mean value among deceased" = total_deceased
+  ) %>%
+  gt::gt() %>%
+  gt::fmt_number(columns = starts_with("mean"), decimals = 0) %>%
+  tab_header(title = "100x 10-fold Cross-Validated Single Variable Concordance", subtitle = "") %>%
+  tab_footnote(footnote = "p-value for one sided t-test comparing variable to variable with higest mean concordance",
+               locations = cells_column_labels(columns = "p-value")) %>%
+  cols_align(columns = everything(), align = "left"); tab
+
+# for latex
+tab %>%
+  as.data.frame() %>%
+  select(-p.value) %>%
+  kableExtra::kbl("latex", booktabs = TRUE)
+
+# for latex
+tab %>%
+  as.data.frame() %>%
+  select(-p.value) %>%
+  kableExtra::kbl("latex", booktabs = TRUE)
+
+
+
+### supplemental tables with sensitivity
+
+wt_single_summ =
+  wt_single %>%
+  # filter(!grepl("peak", variable)) %>%
+  group_by(variable) %>%
+  summarize(concordance = mean(concordance))
+
+sens =
+  readRDS(here::here("results", "metrics_wtd_100_singlevar_sens.rds")) %>%
+  group_by(variable) %>%
+  mutate(ind = row_number(),
+         rep = floor((row_number()-1)/10)) %>%
+  group_by(variable, rep) %>%
+  summarize(concordance = mean(concordance)) %>%
+  group_by(variable) %>%
+  summarize(concordance_sens = mean(concordance))
+
+sens80 =
+  readRDS(here::here("results", "metrics_wtd_100_singlevar_80.rds")) %>%
+  group_by(variable) %>%
+  mutate(ind = row_number(),
+         rep = floor((row_number()-1)/10)) %>%
+  group_by(variable, rep) %>%
+  summarize(concordance = mean(concordance)) %>%
+  group_by(variable) %>%
+  summarize(concordance_80 = mean(concordance))
+
+tab =
+  wt_single_summ %>%
+  left_join(sens, by = "variable") %>%
+  left_join(sens80, by = "variable") %>%
+  arrange(desc(concordance)) %>%
+  mutate(variable_fac = factor(
+    variable,
+    labels = vlabs
+  )) %>%
+  filter(!grepl("peak", variable)) %>%
+  rename(
+    Variable = variable_fac,
+    Concordance = concordance,
+    "Concordance, >= 1 Valid Day" = concordance_sens,
+    "Concordance, inc. 80" = concordance_80
+  ) %>%
+  select(Variable, contains("concordance")) %>%
+  gt::gt() %>%
+  gt::fmt_number(columns = contains("concordance"), decimals = 3) %>%
+  cols_align(columns = everything(), align = "left"); tab
+
 # for latex
 tab %>%
   as.data.frame() %>%
   kableExtra::kbl("latex", booktabs = TRUE)
+
 
 # include cadence values
 data_summary = wt_single %>%
@@ -592,7 +820,47 @@ tab %>%
   as.data.frame() %>%
   kableExtra::kbl("latex", booktabs = TRUE)
 
+# calculate some other stats to manually add to table
 
+df_mortality_win %>%
+  group_by(mortstat) %>%
+  count(cat_bmi) %>%
+  mutate(pct = n / sum(n) * 100)
+
+df_mortality_win %>%
+  group_by(mortstat) %>%
+  count(general_health_condition) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  select(-n) %>%
+  pivot_wider(names_from = mortstat, values_from = pct)
+
+df_mortality_win %>%
+  group_by(mortstat) %>%
+  count(cat_smoke) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  select(-n) %>%
+  pivot_wider(names_from = mortstat, values_from = pct)
+
+df_mortality_win %>%
+  group_by(mortstat) %>%
+  count(cat_alcohol) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  select(-n) %>%
+  pivot_wider(names_from = mortstat, values_from = pct)
+
+df_mortality_win %>%
+  group_by(mortstat) %>%
+  count(cat_education) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  select(-n) %>%
+  pivot_wider(names_from = mortstat, values_from = pct)
+
+df_mortality_win %>%
+  group_by(mortstat) %>%
+  count(race_hispanic_origin) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  select(-n) %>%
+  pivot_wider(names_from = mortstat, values_from = pct)
 ### multivariable model summaries
 wt_small =
   wt_all %>%
@@ -603,10 +871,10 @@ summary =
   group_by(model) %>%
   summarize(across(concordance, list(mean = ~mean(.x),
                                      se = ~sd(.x)/sqrt(n())))) %>%
-  mutate(model_fac = factor(model, labels = c("Demographics only",
-                                              "Demographics + MIMS",
-                                              "Demographics + SCRF steps",
-                                              "Demographics + SCRF steps + MIMS")))
+  mutate(model_fac = factor(model, labels = c("Traditional predictors only",
+                                              "Traditional predictors+ MIMS",
+                                              "Traditional predictors+ SCRF steps",
+                                              "Traditional predictors+ SCRF steps + MIMS")))
 # get coefficients from steps model
 coef_scrf =
   df_mortality_win %>%
@@ -750,6 +1018,14 @@ steps_res =
          ci_low = exp(500*(estimate - (1.96 * std.error))),
          ci_high = exp(500*(estimate + (1.96 * std.error))))
 
+steps_res_raw =
+  map_dfr(.x = pa_vars,
+          .f = fit_model,
+          df = df_mortality_win)
+
+steps_res_raw %>%
+  mutate(step_inc = log(0.88)/estimate)
+
 
 steps_res_scaled =
   map_dfr(.x = c(pa_vars, "total_PAXMTSM", "total_AC"),
@@ -770,10 +1046,10 @@ tab = steps_res %>%
   left_join(sds, by = c("term" = "name")) %>%
   arrange(desc(hr_scaled)) %>%
   mutate(variable_fac = forcats::fct_reorder(term, hr_scaled, mean),
-         ci_raw = paste0(sprintf("%0.3f",round(hr_raw, 3)),
-                         " (", sprintf("%0.3f",round(ci_low_raw, 3)), ", ", sprintf("%0.3f",round(ci_high_raw, 3)), ")"),
-         ci_sc = paste0(sprintf("%0.3f",round(hr_scaled, 3)),
-                        " (", sprintf("%0.3f",round(ci_low_scaled, 3)), ", ", sprintf("%0.3f",round(ci_high_scaled, 3)), ")")) %>%
+         ci_raw = paste0(sprintf("%0.2f",round(hr_raw, 2)),
+                         " (", sprintf("%0.2f",round(ci_low_raw, 2)), ", ", sprintf("%0.2f",round(ci_high_raw, 2)), ")"),
+         ci_sc = paste0(sprintf("%0.2f",round(hr_scaled, 2)),
+                        " (", sprintf("%0.2f",round(ci_low_scaled, 2)), ", ", sprintf("%0.2f",round(ci_high_scaled, 2)), ")")) %>%
   select("Variable" = variable_fac, "HR, Raw" = ci_raw, "HR, Scaled" = ci_sc, "SD" = value) %>%
   gt::gt() %>%
   cols_align(columns = everything(), align = "left"); tab
@@ -782,4 +1058,138 @@ tab %>%
   as.data.frame() %>%
   kableExtra::kbl("latex", booktabs = TRUE)
 
+## supplement multivariable model summaries
+wt_all_summ =
+  wt_all %>%
+  # filter(!grepl("peak", variable)) %>%
+  group_by(model) %>%
+  summarize(concordance = mean(concordance)) %>%
+  filter(!grepl("\\+", model))
+
+sens =
+  readRDS(here::here("results", "metrics_wtd_100_sens.rds")) %>%
+  filter(!grepl("\\+", model)) %>%
+  group_by(model) %>%
+  mutate(ind = row_number(),
+         rep = floor((row_number()-1)/10)) %>%
+  group_by(model, rep) %>%
+  summarize(concordance = mean(concordance)) %>%
+  group_by(model) %>%
+  summarize(concordance_sens = mean(concordance))
+
+sens80 =
+  readRDS(here::here("results", "metrics_wtd_100_80.rds")) %>%
+  filter(!grepl("\\+", model)) %>%
+  group_by(model) %>%
+  mutate(ind = row_number(),
+         rep = floor((row_number()-1)/10)) %>%
+  group_by(model, rep) %>%
+  summarize(concordance = mean(concordance)) %>%
+  group_by(model) %>%
+  summarize(concordance_sens80 = mean(concordance))
+
+tab =
+  wt_all_summ %>%
+  left_join(sens, by = "model") %>%
+  left_join(sens80, by = "model") %>%
+  arrange(desc(concordance)) %>%
+  rename(
+    Model = model,
+    Concordance = concordance,
+    "Concordance, >= 1 Valid Day" = concordance_sens,
+    "Concordance, inc. 80 yo" = concordance_sens80
+  ) %>%
+  select(Model, contains("conc")) %>%
+  arrange(desc(Concordance)) %>%
+  gt::gt() %>%
+  gt::fmt_number(columns = contains("concordance"), decimals = 3) %>%
+  cols_align(columns = everything(), align = "left"); tab
+
+
+# for latex
+tab %>%
+  as.data.frame() %>%
+  kableExtra::kbl("latex", booktabs = TRUE)
+
+# add in hazard ratios assoc. w/ 500 extra steps
+
+
+steps_res =
+  map_dfr(.x = pa_vars,
+          .f = fit_model,
+          df = df_mortality_win) %>%
+  mutate(hr = exp(estimate * 500),
+         ci_low = exp(500*(estimate - (1.96 * std.error))),
+         ci_high = exp(500*(estimate + (1.96 * std.error))))
+
+df_sens =
+  df_all %>%
+  filter(num_valid_days > 0) %>%
+  filter(age_in_years_at_screening >= 50 &
+           age_in_years_at_screening < 80) %>%
+  filter(if_all(.cols = c(age_in_years_at_screening, gender,
+                          race_hispanic_origin, cat_education,
+                          cat_bmi, chd, chf, heartattack, stroke, cancer,
+                          bin_diabetes, cat_alcohol, cat_smoke, bin_mobilityproblem,
+                          general_health_condition, mortstat, permth_exm),
+                ~!is.na(.x))) %>%
+  mutate(event_time = permth_exm / 12) %>%
+  ungroup() %>%
+  mutate(across(c(contains("total"), contains("peak")), ~DescTools::Winsorize(.x, quantile(.x, probs = c(0, 0.99)))))
+
+df_80 =
+  df_all %>%
+  filter(num_valid_days >= 3) %>%
+  filter(age_in_years_at_screening >= 50) %>%
+  filter(if_all(.cols = c(age_in_years_at_screening, gender,
+                          race_hispanic_origin, cat_education,
+                          cat_bmi, chd, chf, heartattack, stroke, cancer,
+                          bin_diabetes, cat_alcohol, cat_smoke, bin_mobilityproblem,
+                          general_health_condition, mortstat, permth_exm),
+                ~!is.na(.x))) %>%
+  mutate(event_time = permth_exm / 12) %>%
+  ungroup() %>%
+  mutate(across(c(contains("total"), contains("peak")), ~DescTools::Winsorize(.x, quantile(.x, probs = c(0, 0.99)))))
+
+steps_res_sens =
+  map_dfr(.x = pa_vars,
+          .f = fit_model,
+          df = df_sens) %>%
+  mutate(hr = exp(estimate * 500),
+         ci_low = exp(500*(estimate - (1.96 * std.error))),
+         ci_high = exp(500*(estimate + (1.96 * std.error)))) %>%
+  mutate(term = sub(".*total\\_", "", term))
+
+
+
+steps_res_80 =
+  map_dfr(.x = pa_vars,
+          .f = fit_model,
+          df = df_80) %>%
+  mutate(hr = exp(estimate * 500),
+         ci_low = exp(500*(estimate - (1.96 * std.error))),
+         ci_high = exp(500*(estimate + (1.96 * std.error)))) %>%
+  mutate(term = sub(".*total\\_", "", term))
+
+
+tab =
+  wt_all_summ %>%
+  left_join(sens, by = "model") %>%
+  left_join(sens80, by = "model") %>%
+  left_join(steps_res %>% mutate(term = sub(".*total\\_", "", term)) %>% select(term, hr),
+            by = c("model" = "term")) %>%
+  left_join(steps_res_sens %>% select(term, hr_sens = hr),
+            by = c("model" = "term")) %>%
+  left_join(steps_res_80 %>% select(term, hr_80 = hr),
+            by = c("model" = "term"))  %>%
+  arrange(desc(concordance)) %>%
+  select(model, contains("conc"), contains("hr")) %>%
+  arrange(desc(concordance)) %>%
+  gt::gt() %>%
+  gt::fmt_number(columns = c(contains("concordance"), contains("hr")), decimals = 3) %>%
+  cols_align(columns = everything(), align = "left"); tab
+
+tab %>%
+  as.data.frame() %>%
+  kableExtra::kbl("latex", booktabs = TRUE)
 
