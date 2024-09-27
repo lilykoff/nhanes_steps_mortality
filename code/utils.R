@@ -76,4 +76,8 @@ get_xpt = function(nh_table) {
 }
 
 
-
+winsorize = function (x, val = quantile(x, probs = c(0.05, 0.95), na.rm = FALSE)) {
+  x[x < val[1L]] <- val[1L]
+  x[x > val[2L]] <- val[2L]
+  return(x)
+}

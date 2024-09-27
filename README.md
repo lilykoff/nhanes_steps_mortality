@@ -20,29 +20,25 @@ Given minute-level step counts from NHANES, run mortality analysis
   - join demographics and physical activity data
 - `step_07<>_run_<>models.R`:
   - `step_07a_run_univariate_models.R`: run univariate Cox PH models (i.e. `mortality ~ variable`) for all variables in the dataset
-  - `step_07b_run_multivariate_models.R`: run multivariable Cox PH models (i.e. `mortality ~ PA variable(s) + demographics`) for various combinations of PA variables 
-  - `step_07c_run_multivariate_cadence_models.R`: run multivariable Cox PH models testing whether cadence adds predictive power beyond just totals 
-- `step_08<>_run_sensitivity_<>.R`: sensitivity analysis on accelerometry inclusion criteria
-  - `step_08a_run_sensitivity_univariate.R`: run univariate models using all individuals with at least 1 valid day of data (instead of at least 3 valid days) 
-  - `step_08a_run_sensitivity_multivariate.R`: run multivariate models using all individuals with at least 1 valid day of data (instead of at least 3 valid days) 
-- `step_09a_tables.R`: create all tables for manuscript
-- `step_09b_figures.R`: create all figures for manuscript
-- `Analysis.qmd`: final analyses for manuscript 
+  - `step_07b_run_sensitivity_univariate.R`: run univariate Cox PH models for individuals with at least one valid day of data (instead of 3)
+  - `step_07c_run_agesensitivity_univariate.R`: run univariate Cox PH models for individuals including 80 year olds (instead of 50-79 year olds)
+- `step_08<>_run_multivariate_models<>.R`: 
+  - `step_08a_run_multivarate_models.R`: run multivariable models using all individuals with at least 1 valid day of data (instead of at least 3 valid days) 
+  - `step_08b_run_sensitivity_multivariate.R`: run multivariate models using all individuals with at least 1 valid day of data (instead of at least 3 valid days) 
+  - `step_08c_run_multivariate_cadence_models.R`: run multivariate models with total steps and cadence to investigate added predictive power of cadence
+  - `step_08d_run_agesensitivity_multivariate.R`: run multivariate models using all individuals with at least including 80 year olds (instead of 50-79 year olds)
+- `step_09a_figures.R`: create all figures for manuscript
+- `step_09b_tables.R`: create all tables for manuscript
 - `utils.R`: some helpful functions 
+- `create_subjectinfo_file.R`: create file with subject info for physionet submission 
   
 ## data 
 
 `covariates_accel_mortality_df.rds`: final processed analytical dataset used for manuscript models and analysis 
 
-### demographics 
-#### raw
-Raw `.XPT` files from [https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/overview.aspx?BeginYear=2013](NHANES website) and mortality data from [https://www.cdc.gov/nchs/data-linkage/mortality-public.htm](NCHS website)
-#### processed 
-Combined and processed raw data from `.XPT` files and mortality data 
-
 ### accelerometry
-- `inclusion_summary.csv.gz`: summary of wear time and other criteria by day and subject 
-
+ `inclusion_summary.csv.gz`: summary of wear time and other criteria by day and subject 
+ 
 #### minute_level
 
 -   Each file entitled `nhanes_1440_<varname>rds`. `<varname>` is one of: `actisteps`, `adeptsteps`, `oaksteps`, `scrfsteps`, `scsslsteps`, `vssteps`, `vsrevsteps`, `AC`, `log10AC`, `PAXMTSM`, `log10PAXMTSM`, `PAXPREDM`, `PAXFLGSM`
@@ -64,12 +60,27 @@ Combined and processed raw data from `.XPT` files and mortality data
   - `zero_MIMS_min`: minutes with zero MIMS
   - `include_day`: logical, whether day meets following criteria: at least 1368 minutes classified as wake wear, sleep wear, or unknown and had no data quality flags, at least 420 minutes classified as wake wear, and at least 420 minutes had non-zero MIMS
 
+
+### demographics 
+#### raw
+Raw `.XPT` files from [https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/overview.aspx?BeginYear=2013](NHANES website) and mortality data from [https://www.cdc.gov/nchs/data-linkage/mortality-public.htm](NCHS website)
+#### processed 
+Combined and processed raw data from `.XPT` files and mortality data 
+
+
 ## results 
+- `metrics_wtd_100_singlevar.rds`: single variable concordances from 100 times repeated survey-weighted 10-fold cross validation 
+- `metrics_wtd_100.rds`: multivariable concordances from 100 times repeated survey-weighted 10-fold cross validation
+- `metrics_wtd_100_singlevar_sens.rds`: single variable concordances from 100 times repeated survey-weighted 10-fold cross validation - sensitivity analysis including everyone with at least one valid day 
+- `metrics_wtd_100_sens.rds`: multivariable concordances from 100 times repeated survey-weighted 10-fold cross validation - sensitivity analysis including everyone with at least one valid day 
+- `metrics_wtd_100_singlevar_80.rds`: single variable concordances from 100 times repeated survey-weighted 10-fold cross validation - sensitivity analysis including 80+ year olds 
+- `metrics_wtd_100_80.rds`: multivariable concordances from 100 times repeated survey-weighted 10-fold cross validation - sensitivity analysis including 80+ year olds 
 
 ## manuscript
+### figures
+Figures for manuscript 
 
-## presentations
+## vignettes
+- `NHANES_Steps_Mortality_Vignette.qmd`: vignette describing manuscript analyses 
+- `Weartime_Vignette.qmd`: vignette on weartime criteria for NHANES data
 
-## 
-
-  
