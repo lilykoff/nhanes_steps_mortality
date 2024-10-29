@@ -1,4 +1,6 @@
 library(tidyverse)
+library(gt)
+library(gtsummary)
 pa_df = readRDS(here::here("data", "accelerometry", "summarized", "pa_df_subject_level.rds"))
 covariates = readRDS(here::here("data", "demographics", "processed", "covariates_mortality_G_H_tidy.rds"))
 wt_file = readr::read_csv(here::here("data", "accelerometry", "inclusion_summary.csv.gz"),
