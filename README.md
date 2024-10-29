@@ -22,13 +22,17 @@ Given minute-level step counts from NHANES, run mortality analysis
   - `step_07a_run_univariate_models.R`: run univariate Cox PH models (i.e. `mortality ~ variable`) for all variables in the dataset
   - `step_07b_run_sensitivity_univariate.R`: run univariate Cox PH models for individuals with at least one valid day of data (instead of 3)
   - `step_07c_run_agesensitivity_univariate.R`: run univariate Cox PH models for individuals including 80 year olds (instead of 50-79 year olds)
+  - `step_07d_run_quartilesensitivity_univariate.R`: run univariate Cox PH models using quartiles of PA variables (instead of continuous)
+  - `step_07e_run_stratified_univariate.R`: run univariate Cox PH models stratified by age, mobility, and self-reported health
 - `step_08<>_run_multivariate_models<>.R`: 
   - `step_08a_run_multivarate_models.R`: run multivariable models using all individuals with at least 1 valid day of data (instead of at least 3 valid days) 
   - `step_08b_run_sensitivity_multivariate.R`: run multivariate models using all individuals with at least 1 valid day of data (instead of at least 3 valid days) 
   - `step_08c_run_multivariate_cadence_models.R`: run multivariate models with total steps and cadence to investigate added predictive power of cadence
   - `step_08d_run_agesensitivity_multivariate.R`: run multivariate models using all individuals with at least including 80 year olds (instead of 50-79 year olds)
-- `step_09a_figures.R`: create all figures for manuscript
-- `step_09b_tables.R`: create all tables for manuscript
+  - `step_08e_run_stratified_multivariate.R`: run multivariate models stratified by age, mobility, and self-reported health
+  - `step_09_nonlinear_associations.R`: run models to investigate nonlinear associations between PA and mortality
+- `manuscript_figures.R`: generate all figs for manuscript
+- `manuscript_tables.R`: generate all tables for manuscript 
 - `utils.R`: some helpful functions 
 - `create_subjectinfo_file.R`: create file with subject info for physionet submission 
   
