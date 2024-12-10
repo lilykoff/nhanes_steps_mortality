@@ -1,0 +1,25 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: NHANES 2011-2014 step counts
+message: >-
+  Minute-level step counts from five algorithms for NHANES
+  2011-2014
+type: software
+authors:
+  - given-names: Lily
+    family-names: Koffman
+    email: koffmanlily@gmail.com
+    affiliation: >-
+      Johns Hopkins Bloomberg School of Public Health
+      Department of Biostatistics
+    orcid: 'https://orcid.org/0000-0003-1543-2896'
+  - given-names: John
+    family-names: Muschelli
+    email: muschellij2@gmail.com
+    orcid: 'https://orcid.org/0000-0001-6469-1750'
+    affiliation: >-
+      Johns Hopkins Bloomberg School of Public Health      
+      Department of Biostatistics
+repository-code: 'https://github.com/lilykoff/nhanes_steps_mortality'
