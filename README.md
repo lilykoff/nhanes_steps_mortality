@@ -1,6 +1,6 @@
 # nhanes_steps_mortality
 
-Purpose: accompanies xx manuscript
+Purpose: accompanies [Comparing Step Counting Algorithms for High-Resolution Wrist Accelerometry Data in NHANES 2011-2014](https://pubmed.ncbi.nlm.nih.gov/39589008/)
 
 Given minute-level step counts from NHANES, run mortality analysis 
 
