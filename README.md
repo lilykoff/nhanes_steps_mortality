@@ -2,6 +2,8 @@
 
 Purpose: accompanies [Comparing Step Counting Algorithms for High-Resolution Wrist Accelerometry Data in NHANES 2011-2014](https://pubmed.ncbi.nlm.nih.gov/39589008/)
 
+Minute-level data can be downloaded from [Physionet repository](https://physionet.org/content/minute-level-step-count-nhanes/1.0.0/)
+
 Given minute-level step counts from NHANES, run mortality analysis 
 
 ## code
