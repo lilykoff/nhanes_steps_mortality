@@ -189,6 +189,7 @@ df_svy =
   df_tab1 %>%
   filter(has_accel) %>%
   filter(valid_accel) %>%
+  filter(age_in_years_at_screening >= 18) %>%
   select(
     gender,
     age_in_years_at_screening,
@@ -230,9 +231,11 @@ tab = df_svy %>%
   add_overall() %>%
   modify_caption("Demographic Characteristics, All Adults"); tab
 
+
 # survey weighted table, for latex
 tab %>%
-  kableExtra::kbl("latex", booktabs = TRUE)
+  as_gt() %>%
+  gtsave(here::here("manuscript", "tables", "table2.docx"))
 
 # unweighted table, for comparison
 df_unwt =
@@ -445,6 +448,11 @@ tab = df_analysis_svy %>%
 # for latex
 tab %>%
   kableExtra::kbl("latex", booktabs = TRUE)
+
+tab %>%
+  as_gt() %>%
+  gtsave(here::here("manuscript", "tables", "table3.docx"))
+
 
 ## unweighted, for comparison
 df %>%
@@ -948,6 +956,10 @@ tab %>%
   data.frame() %>%
   kableExtra::kbl(format = "latex")
 
+tab %>%
+  gtsave(here::here("manuscript", "tables", "table4.docx"))
+
+
 ### scaled and raw hazard ratios table
 # labels df
 var_labels =
@@ -1066,6 +1078,10 @@ tab = steps_res %>%
 tab %>%
   as.data.frame() %>%
   kableExtra::kbl("latex", booktabs = TRUE)
+
+tab %>%
+  gtsave(here::here("manuscript", "tables", "table5.docx"))
+
 
 ## supplement multivariable model summaries
 wt_all_summ =
@@ -1463,6 +1479,7 @@ tab = wt_all_summ %>%
 tab %>%
   as.data.frame() %>%
   kableExtra::kbl("latex", booktabs = TRUE)
+
 
 quartile_conc = readRDS(here::here("results", "metrics_wtd_100_singlevar_stepsquartile.rds")) %>%
   group_by(variable) %>%
