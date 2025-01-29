@@ -8,6 +8,8 @@ Given minute-level step counts from NHANES, run mortality analysis
 
 ## code
 
+- `step_00_download_pa_data.R`:
+  - download minute-level physical activity data from Physionet 
 - `step_01_download_covariates.R`: 
   - download relevant covariate data from NHANES website, and translate columns
 - `step_02_create_analytic_covar_dataset.R`: 
@@ -16,8 +18,10 @@ Given minute-level step counts from NHANES, run mortality analysis
   - download mortality data and process from NHANES website
 - `step_04_join_demo_mortality.R`:
   - join mortality data and demographic data 
-- `step_05_summarize_pa.R`
+- `step_05a_summarize_pa.R`
   - summarize minute level physical activity data to subject level
+- `step_05b_create_inclusion_df.R`
+  - create inclusion criteria data frame based on acceleremetry data 
 - `step_06_join_demo_pa.R`
   - join demographics and physical activity data
 - `step_07<>_run_<>models.R`:
