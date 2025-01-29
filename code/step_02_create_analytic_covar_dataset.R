@@ -198,3 +198,49 @@ sample =
 
 readr::write_csv(sample, here::here("data", "demographics","example_subjects.csv"))
 
+
+# for pax y
+library(tidyverse)
+# follow https://github.com/andrew-leroux/rnhanesdata/blob/master/vignettes/create-all-processed-data.Rmd
+
+# function to replace refused or don't know with NAs
+replace_NA_bin = function(x){
+  ifelse(x %in% c("Refused", "Don't know", "don't know", "Don't Know"), NA, ifelse(x == "Yes", 1, 0))
+  # case_when(x %in% c("Refused", "Don't know", "don't know") ~ NA,
+  #           x == "Yes", 1,
+  #           TRUE ~ 0)
+}
+
+replace_NA_cat = function(x){
+  ifelse(x %in% c("Refused", "Don't know", "Don't Know", "don't know"), NA, x)
+}
+
+# first read in dataset
+temp =
+  readr::read_csv(here::here("data", "demographics", "processed", "subset_Y_DEMO_BMX_DIQ_MCQ_PAQ_PFQ_translated.csv.gz"),
+                  col_types = cols('Respondent sequence number' = col_character()))
+# readr::read_csv(here::here("lily", "data", "subset_G_H_DEMO_ALQ_BMX_DIQ_MCQ_PAQ_PFQ_translated.csv.gz"))
+
+# general health condition x is from HSD
+# general health condition y is from HUQ
+temp_mutated =
+  temp %>%
+  janitor::clean_names() %>%
+  rename(SEQN = respondent_sequence_number) %>%
+  mutate(
+    cat_bmi =
+      case_when(
+        between(body_mass_index_kg_m_2, 0, 18.5) ~ "Underweight",
+        between(body_mass_index_kg_m_2, 18.5, 25) ~ "Normal",
+        between(body_mass_index_kg_m_2, 25, 30) ~ "Overweight",
+        body_mass_index_kg_m_2 > 30 ~ "Obese",
+        TRUE ~ NA
+      ))
+
+temp_mutated =
+  temp_mutated %>% mutate_if(is.character, factor) %>%
+  mutate(SEQN = as.character(SEQN))
+
+
+saveRDS(temp_mutated, here::here("data", "demographics", "processed", "subset_Y_tidy.rds"))
+
