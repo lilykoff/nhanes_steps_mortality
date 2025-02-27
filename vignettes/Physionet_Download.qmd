@@ -1,0 +1,121 @@
+---
+title: "Data Download Vignette"
+format:
+  html:
+    toc: true
+    toc-location: right
+    embed-resources: true
+    code-background: true
+    code-tools: true
+    code-fold: false
+    code-block-border-left: true
+    code-link: true
+    other-links:
+      text: GitHub Repo
+      icon: github
+      href: https://github.com/lilykoff/nhanes_steps_mortality
+theme: flatly
+execute:
+  echo: true
+  cache: true
+  message: false
+  warning: false
+editor: source
+---
+
+The following code can be used to download minute-level step counts and other data from NHANES 2011-2014 from our [Physionet repository](https://physionet.org/content/minute-level-step-count-nhanes/1.0.0/) 
+
+
+```{r setup}
+#| include: false
+
+library(tidyverse)
+
+```
+
+
+```{r}
+#| echo: true
+#| eval: false
+
+if(!dir.exists(here::here("data", "accelerometry", "minute_level"))) {
+  dir.create(here::here("data", "accelerometry", "minute_level"),
+             recursive = TRUE)
+}
+
+download_file = function(name) {
+  out_file =
+    here::here("data",
+               "accelerometry",
+               "minute_level",
+               paste0("nhanes_1440_", name, ".csv.xz"))
+  if (!file.exists(out_file)) {
+    url = paste0(
+      "https://physionet.org/files/minute-level-step-count-nhanes/1.0.0/nhanes_1440_",
+      name,
+      ".csv.xz"
+    )
+    system(paste(
+      "wget -q --show-progress -O",
+      shQuote(out_file),
+      shQuote(url)
+    ),
+    wait = TRUE)
+    
+  }
+}
+
+file_names = c(
+  "AC",
+  "PAXFLGSM",
+  "PAXPREDM",
+  "actisteps",
+  "adeptsteps",
+  "log10AC",
+  "log10PAXMTSM",
+  "oaksteps",
+  "scrfsteps",
+  "scsslsteps",
+  "vsrevsteps",
+  "vssteps"
+)
+purrr::walk(.x = file_names, .f = download_file)
+
+```
+
+We can read in one file to get a sense of the structure. 
+There are columns for ID, day, weekday, and each minute of the day (`min_1` to `min_1440`). Missingness indicates that either: 
+
+1. data were missing for that minute (i.e. wear hadn't started yet)
+2. NHANES gave a wear flag for that minute, or
+3. the NHANES prediction for that minute was nonwear
+
+```{r}
+#| cache: true
+
+
+sc_steps = read_csv(
+  here::here(
+    "data",
+    "accelerometry",
+    "minute_level",
+    "nhanes_1440_scsslsteps.csv.xz"
+  )
+)
+
+sc_steps %>%
+  select(
+    SEQN,
+    PAXDAYM,
+    PAXDAYWM,
+    min_1,
+    min_100,
+    min_200,
+    min_300,
+    min_400,
+    min_600,
+    min_800,
+    min_1000
+  ) %>%
+  glimpse()
+```
