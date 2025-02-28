@@ -1,0 +1,28 @@
+project:
+  type: website
+  output-dir: docs
+  render:
+    - vignettes/Analysis.qmd
+    - vignettes/NHANES_Steps_Mortality_Vignette.qmd
+    - vignettes/Physionet_Download.qmd
+
+website:
+  title: "NHANES Mortality Prediction from Steps"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - vignettes/Analysis.qmd
+      - vignettes/NHANES_Steps_Mortality_Vignette.qmd
+      - vignettes/Physionet_Download.qmd
+  repo-url: https://github.com/lilykoff/nhanes_steps_mortality
+  image: images/WIT.png
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true
+
+
+

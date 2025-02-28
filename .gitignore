@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+/.quarto/
+data/accelerometry/
+data/demographics/processed/subset_Y_tidy.rds
+data/demographics/example_subjects.csv
+vignettes/*_cache
+data/demographics/processed

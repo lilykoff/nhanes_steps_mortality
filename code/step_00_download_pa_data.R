@@ -4,53 +4,24 @@ library(httr)
 force = FALSE
 folder_name = "minute-level-step-counts-and-physical-activity-data-from-the-national-health-and-nutrition-examination-survey-nhanes-2011-2014-1.0.0"
 
-if(!file.exists(
-  here::here(
-    "data",
-    "accelerometry",
-    "minute_level",
-    folder_name,
-    "nhanes_1440_AC.csv.xz"
-  )
-) ||
-force) {
-  zip_url =
-    "https://physionet.org/static/published-projects/minute-level-step-count-nhanes/minute-level-step-counts-and-physical-activity-data-from-the-national-health-and-nutrition-examination-survey-nhanes-2011-2014-1.0.0.zip"
-
-  zip_file = "minute_level_data.zip"
+download_csv_xz = function(fname, force = FALSE) {
+  zip_base_url = "https://physionet.org/files/minute-level-step-count-nhanes/1.0.0/"
   output_dir = here::here("data", "accelerometry", "minute_level")
-
-  # Download the file using httr
-  response = GET(zip_url, write_disk(zip_file, overwrite = TRUE), progress())
-
-  # Check the response status
-  if (response$status_code == 200) {
-    message("File downloaded successfully: ", zip_file)
-  } else {
-    stop("Failed to download file. HTTP status: ",
-         response$status_code)
+  dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+  outfile = file.path(output_dir, fname)
+  if(!file.exists(outfile) || force) {
+    url = paste0(
+      zip_base_url,
+      fname
+    )
+    curl::curl_download(url, outfile, quiet = FALSE)
   }
-
-  # Check if the file was downloaded successfully
-  if (file.exists(zip_file)) {
-    message("ZIP file downloaded successfully: ", zip_file)
-
-    # Create a directory for extraction if it doesn't exist
-    if (!dir.exists(output_dir)) {
-      dir.create(output_dir, recursive = TRUE)
-    }
-
-    # Extract the ZIP file
-    unzip(zip_file, exdir = output_dir)
-    message("ZIP file extracted to: ", output_dir)
-  } else {
-    message("File download failed.")
-  }
-
-  # List extracted files
-  list.files(output_dir, recursive = TRUE)
-
-  # remove the zip file
-  file.remove(zip_file)
 }
+
+fnames = c("nhanes_1440_AC.csv.xz",
+           "nhanes_1440_PAXFLGSM.csv.xz",
+           "nhanes_1440_PAXMTSM.csv.xz",
+           "nhanes_1440_PAXPREDM.csv.xz")
+sapply(fnames, download_csv_xz, force = force)
+
 

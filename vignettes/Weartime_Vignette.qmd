@@ -74,7 +74,10 @@ library(htmlwidgets)
 library(htmltools)
 
 # demographics data 
-demo = readRDS(here::here("vignettes", "vignette_data", "covariates_mortality_G_H_tidy.rds"))
+fname_demo = here::here("data", "demographics", 
+                        "processed", "covariates_mortality_G_H_tidy.rds")
+
+demo = readRDS(fname_demo)
 
 wear = readr::read_csv(here::here("vignettes", "vignette_data", "weartime_summaries.csv.gz"))
 

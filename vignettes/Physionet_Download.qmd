@@ -11,9 +11,9 @@ format:
     code-block-border-left: true
     code-link: true
     other-links:
-      text: GitHub Repo
-      icon: github
-      href: https://github.com/lilykoff/nhanes_steps_mortality
+      - text: GitHub Repo
+        icon: github
+        href: https://github.com/lilykoff/nhanes_steps_mortality
 theme: flatly
 execute:
   echo: true
