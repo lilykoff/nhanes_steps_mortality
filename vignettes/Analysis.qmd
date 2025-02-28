@@ -322,6 +322,8 @@ df_accel %>%
         axis.title = element_text(size = 14)) + 
   labs(x = "Mean Daily Steps x 1000", y = "Density", title = "Distribution of Mean Daily Step Counts",
        subtitle = "All Individuals aged 18+ with Valid Accelerometry Data")
+dir.create(here::here("manuscript", "figures"), showWarnings = FALSE,
+           recursive = TRUE)
 ggsave(here::here("manuscript", "figures", "step_distributions.png"), dpi = 400, width = 10, height = 8)
 
 df_accel %>%
@@ -1125,6 +1127,55 @@ Figure 2?
 
 ```{r}
 
+mean_mat <- function(df, abs = FALSE) {
+  # Ensure the input is a dataframe
+  if (!is.data.frame(df)) {
+    stop("Input must be a dataframe")
+  }
+  
+  # Check if all columns are numeric
+  if (!all(sapply(df, is.numeric))) {
+    stop("All columns in the dataframe must be numeric")
+  }
+  
+  # Get the number of columns
+  num_cols <- ncol(df)
+  
+  # Initialize a matrix to store the mean absolute differences
+  mad_matrix <- matrix(NA, nrow = num_cols, ncol = num_cols)
+  rownames(mad_matrix) <- colnames(df)
+  colnames(mad_matrix) <- colnames(df)
+  
+  # Calculate the mean absolute difference for each pair of columns
+  for (i in 1:num_cols) {
+    for (j in 1:num_cols) {
+      if (i <= j) {
+        # Calculate mean absolute difference, handling potential NAs
+        if(abs){
+          d = abs(df[, i] - df[, j])
+        }
+        else{
+          d = df[, i] - df[, j]
+        }
+        # Debug output
+        # print(paste("Calculating MAD for columns", colnames(df)[i], "and", colnames(df)[j]))
+        # print(head(abs_diff))
+        
+        # Calculate mean
+        # mad_matrix[i, j] <- mean(abs_diff %>% unlist, na.rm = TRUE)
+        mad_matrix[i, j] <- mean(d %>% unlist, na.rm = TRUE)
+        mad_matrix[j, i] <- mad_matrix[i, j]  # Symmetric matrix
+      }
+    }
+  }
+  
+  return(mad_matrix)
+}
+```
+
+
+```{r}
+
 cor_mat = 
   df_accel %>% select(contains("total")) %>% 
   select(contains("acti"), contains("adept"), contains("oak"), contains("sc"), contains("vss"), contains("vsr"),
@@ -1228,58 +1279,10 @@ p = corrplot::corrplot(abs_diff_mat,
 
 
 ```{r}
-
-mean_mat <- function(df, abs = FALSE) {
-  # Ensure the input is a dataframe
-  if (!is.data.frame(df)) {
-    stop("Input must be a dataframe")
-  }
-  
-  # Check if all columns are numeric
-  if (!all(sapply(df, is.numeric))) {
-    stop("All columns in the dataframe must be numeric")
-  }
-  
-  # Get the number of columns
-  num_cols <- ncol(df)
-  
-  # Initialize a matrix to store the mean absolute differences
-  mad_matrix <- matrix(NA, nrow = num_cols, ncol = num_cols)
-  rownames(mad_matrix) <- colnames(df)
-  colnames(mad_matrix) <- colnames(df)
-  
-  # Calculate the mean absolute difference for each pair of columns
-  for (i in 1:num_cols) {
-    for (j in 1:num_cols) {
-      if (i <= j) {
-        # Calculate mean absolute difference, handling potential NAs
-        if(abs){
-          d = abs(df[, i] - df[, j])
-        }
-        else{
-          d = df[, i] - df[, j]
-        }
-        # Debug output
-        # print(paste("Calculating MAD for columns", colnames(df)[i], "and", colnames(df)[j]))
-        # print(head(abs_diff))
-        
-        # Calculate mean
-        # mad_matrix[i, j] <- mean(abs_diff %>% unlist, na.rm = TRUE)
-        mad_matrix[i, j] <- mean(d %>% unlist, na.rm = TRUE)
-        mad_matrix[j, i] <- mad_matrix[i, j]  # Symmetric matrix
-      }
-    }
-  }
-  
-  return(mad_matrix)
-}
-
-
-
 mean_diff_mat = df_accel %>% 
   select((contains("total"))) %>% 
   filter(!is.na(total_vssteps)) %>% 
-  mean_absolute_diff()
+  mean_mat(abs = TRUE)
 
 # mean_diff_mat = round(mean_diff_mat, digits = 0)
 

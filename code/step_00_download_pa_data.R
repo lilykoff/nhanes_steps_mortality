@@ -21,7 +21,8 @@ download_csv_xz = function(fname, force = FALSE) {
 fnames = c("nhanes_1440_AC.csv.xz",
            "nhanes_1440_PAXFLGSM.csv.xz",
            "nhanes_1440_PAXMTSM.csv.xz",
-           "nhanes_1440_PAXPREDM.csv.xz")
+           "nhanes_1440_PAXPREDM.csv.xz",
+           "nhanes_1440_scsslsteps.csv.xz")
 sapply(fnames, download_csv_xz, force = force)
 
 

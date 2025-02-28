@@ -9,3 +9,5 @@ data/demographics/processed/subset_Y_tidy.rds
 data/demographics/example_subjects.csv
 vignettes/*_cache
 data/demographics/processed
+vignettes/Analysis_files/
+vignettes/NHANES_Steps_Mortality_Vignette_files/
