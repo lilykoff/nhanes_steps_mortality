@@ -1272,8 +1272,6 @@ p = corrplot::corrplot(abs_diff_mat,
          addgrid.col = "white",
         # addCoef.col = 'black',
         na.label = "-")
-
-
 ```
 
 

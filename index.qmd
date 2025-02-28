@@ -1,3 +1,5 @@
 ---
 title: "NHANES Mortality Prediction from Steps"
 ---
+
+Here we display a number of vignettes to the NHANES data.

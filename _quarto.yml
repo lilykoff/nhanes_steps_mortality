@@ -2,6 +2,7 @@ project:
   type: website
   output-dir: docs
   render:
+    - index.qmd
     - vignettes/Analysis.qmd
     - vignettes/NHANES_Steps_Mortality_Vignette.qmd
     - vignettes/Physionet_Download.qmd
