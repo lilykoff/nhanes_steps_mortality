@@ -1,3 +1,6 @@
+
+See rendered site at https://lilykoff.github.io/nhanes_steps_mortality/
+
 # nhanes_steps_mortality
 
 Purpose: accompanies [Comparing Step Counting Algorithms for High-Resolution Wrist Accelerometry Data in NHANES 2011-2014](https://pubmed.ncbi.nlm.nih.gov/39589008/)
