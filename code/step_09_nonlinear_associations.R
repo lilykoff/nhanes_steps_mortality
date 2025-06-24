@@ -72,7 +72,7 @@ get_median_and_events = function(var){
   df %>%
     select(variable = all_of(var), quartile = all_of(paste0(var, "_quartile")), mortstat) %>%
     group_by(quartile) %>%
-    summarize(median = median(variable),
+    dplyr::summarize(median = median(variable),
               n_events = sum(mortstat),
               n = n()) %>%
     ungroup() %>%
@@ -167,7 +167,7 @@ df =
 summary_scrf =
   df %>%
   group_by(cut_scrf) %>%
-  summarize(n = n(),
+  dplyr::summarize(n = n(),
             n_events = sum(mortstat))
 
 model =
@@ -228,7 +228,7 @@ df =
 summary_vsrev =
   df %>%
   group_by(cut_vsrev) %>%
-  summarize(n = n(),
+  dplyr::summarize(n = n(),
             n_events = sum(mortstat))
 
 model =
@@ -401,10 +401,12 @@ rug_dat =
                                     "total_vsrevsteps"),
                           labels = c("Actilife", "Oak", "Stepcount RF", "Stepcount SSL",
                                      "Verisense", "Verisense rev.")))
+write_rds(rug_dat, here::here("../eba_presentation/EBA/data/rug_dat.rds"))
 
 col_vec = c("#000000FF", "#CC79A7FF", "#E69F00FF", "#D55E00FF", "#56B4E9FF", "#0072B2FF")
 names(col_vec) = c("Actilife", "Oak", "Stepcount RF","Stepcount SSL", "Verisense", "Verisense rev.")
 
+write_rds(all_results, here::here("../eba_presentation/EBA/data/dose_response_dat.rds"))
 
 all_results %>%
   mutate(stepvar = factor(stepvar,

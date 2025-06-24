@@ -827,3 +827,84 @@ if (save) {
   )
 }
 
+
+p1 = wt_single %>%
+  filter(!grepl("peak", variable)) %>%
+  mutate(var_group = case_when(
+    grepl("steps", variable) ~ "Step variable",
+    grepl("total", variable) ~ "Non-step accelerometry variable",
+    TRUE ~ "Non-accelerometry variable"
+  ),
+  var_group = factor(var_group, levels = c("Step variable", "Non-step accelerometry variable", "Non-accelerometry variable"))) %>%
+  group_by(variable, var_group) %>%
+  summarize(mean = mean(concordance),
+            sd = sd(concordance),
+            se = sd(concordance)/sqrt(n())) %>%
+  mutate(ci_low = mean - 1.96*se,
+         ci_high = mean + 1.96*se) %>%
+  ungroup() %>%
+  left_join(var_labels, by = c("variable" = "names")) %>%
+  mutate(labels = factor(labels),
+         labels = fct_reorder(labels, mean)) %>%
+  ggplot(aes(y = labels, x = mean, xmin = ci_low, xmax = ci_high, color = var_group, shape = var_group))+
+  geom_point(size = 3) +
+  # geom_errorbarh(height = .3) +
+  theme_bw() +
+  # scale_color_manual(values = c("#CC79A7FF", "#009E73FF", "#0072B2FF"), name = "")+
+  scale_color_manual(values = c("#FF6DB6", "#009292", "#006DDB"), name = "")+ # colors from paletteer_d("colorBlindness::paletteMartin")
+  scale_shape_manual(values = c(8, 17, 16), name = "")+
+  scale_x_continuous(limits=c(0.5, 0.75), breaks=seq(0.5, 0.75, .05))+
+  theme(legend.position = c(.3, .75),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        axis.text.y = element_text(size = 12),
+        strip.text = element_text(size = 14))+
+  labs(x = "Mean 100-times repeated 10-fold Cross-Validated Survey-Weighted Concordance", y = "")
+
+
+## concordance including "peak" variables
+p2 = wt_single %>%
+  filter(grepl("peak", variable) | grepl("steps", variable)) %>%
+  mutate(var_group = factor(case_when(
+    grepl("peak1", variable) ~ "Peak 1-min variable",
+    grepl("peak30", variable) ~ "Peak 30-min variable",
+    TRUE ~ "Mean daily total variable"
+  ), levels = c("Peak 1-min variable", "Peak 30-min variable", "Mean daily total variable"))) %>%
+  group_by(variable, var_group) %>%
+  summarize(mean = mean(concordance),
+            sd = sd(concordance),
+            se = sd(concordance)/sqrt(n())) %>%
+  mutate(ci_low = mean - 1.96*se,
+         ci_high = mean + 1.96*se) %>%
+  ungroup() %>%
+  left_join(var_labels, by = c("variable" = "names")) %>%
+  mutate(labels = factor(labels),
+         labels = fct_reorder(labels, mean)) %>%
+  ggplot(aes(y = labels, x = mean, xmin = ci_low, xmax = ci_high, color = var_group))+
+  geom_point(size = 3) +
+  # geom_errorbarh() +
+  theme_bw() +
+  # scale_color_manual(values = c("#E69F00FF", "#D55E00FF", "#56B4E9FF"), name = "")+
+  scale_color_manual(values = c("#FF7F00", "#FFBF7F", "#654CFF"), name = "")+ # from paletteer_d("colorBlindness::PairedColor12Steps")
+  scale_x_continuous(limits=c(0.5, 0.75), breaks=seq(0.5, 0.75, .05))+
+  theme(legend.position = c(.3, .7),
+        legend.title = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.title= element_text(size = 14),
+        legend.text = element_text(size = 14),
+        strip.text = element_text(size = 14))+
+  labs(x = "Mean 100-times repeated 10-fold Cross-Validated Survey-Weighted Concordance", y = "")
+
+
+library(patchwork)
+p2 / p1 + plot_layout(axes = "collect", axis_titles = "collect")
+if (save) {
+  ggsave(
+    here::here("manuscript", "figures", "single_concordance_cadence2.png"),
+    width = 8,
+    height = 8,
+    dpi = 400
+  )
+}
+
