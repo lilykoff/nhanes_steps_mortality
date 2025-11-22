@@ -129,7 +129,7 @@ df_small =
   steps_df %>%
   select(SEQN, full_sample_2_year_mec_exam_weight, masked_variance_pseudo_psu, data_release_cycle,
          full_sample_2_year_interview_weight,
-         masked_variance_pseudo_stratum, valid_accel, contains("steps"), gender, age_in_years_at_screening) %>%
+         masked_variance_pseudo_stratum, valid_accel, contains("total"), gender, age_in_years_at_screening) %>%
   filter(valid_accel)
 
 
@@ -140,48 +140,24 @@ joined = reweight_accel(data = df_small,
   mutate(cat_age = cut(age, breaks = c(0,10, 20,30,40,50,60,70,80, 85), include.lowest = FALSE,
                        right = FALSE))
 
-age_tmp = "[40,50)"
-sex = "Female"
-data = joined
+
 options(survey.lonely.psu = "adjust")
-svyquant = function(data, age_tmp, sex){
-  temp =
-    data %>%
-    filter(cat_age == age_tmp & gender == sex) %>%
-    mutate(wt_norm = wtmec4yr_adj_norm / mean(wtmec4yr_adj_norm))
-  svy_design =
-    survey::svydesign(
-      id = ~ masked_variance_pseudo_psu,
-      strata = ~ masked_variance_pseudo_stratum,
-      weights = ~ wt_norm,
-      data = temp,
-      nest = TRUE
-    )
-  svyquantile(~total_scsslsteps, svy_design, quantiles = seq(0, 1, 0.01))$total_scsslsteps[,1] %>% unname() %>%
-    as_tibble() %>%
-    mutate(q = seq(0, 1, 0.01),
-           gender = sex,
-           age_cat = age_tmp)
 
-}
-
-x = map2_dfr(.x = rep(unique(as.character(joined$cat_age)), 2),
-             .y = c(rep("Male", 9), rep("Female", 9)),
-             .f  = svyquant,
-             data = joined)
-
-write_csv(x, here::here("steps_test.csv.gz"))
-
-age_tmp = "[40,50)"
-sex = "Female"
-data = joined
-stepsvar = "total_scsslsteps"
 svyquant_general = function(data, age_tmp, sex, stepsvar){
-  temp =
-    data %>%
-    filter(cat_age == age_tmp & gender == sex) %>%
-    mutate(wt_norm = wtmec4yr_adj_norm / mean(wtmec4yr_adj_norm)) %>%
-    rename(steps = {{stepsvar}})
+  if(sex %in% c("Male", "Female")) {
+    temp =
+      data %>%
+      filter(cat_age == age_tmp & gender == sex) %>%
+      mutate(wt_norm = wtmec4yr_adj_norm / mean(wtmec4yr_adj_norm)) %>%
+      rename(steps = {{stepsvar}})
+  } else {
+    temp =
+      data %>%
+      filter(cat_age == age_tmp) %>%
+      mutate(wt_norm = wtmec4yr_adj_norm / mean(wtmec4yr_adj_norm)) %>%
+      rename(steps = {{stepsvar}})
+  }
+
   svy_design =
     survey::svydesign(
       id = ~ masked_variance_pseudo_psu,
@@ -192,31 +168,31 @@ svyquant_general = function(data, age_tmp, sex, stepsvar){
     )
   svyquantile(~steps, svy_design, quantiles = seq(0, 1, 0.01))$steps[,1] %>% unname() %>%
     as_tibble() %>%
-    mutate(q = seq(0, 1, 0.01),
+    mutate(quantile = seq(0, 1, 0.01),
            gender = sex,
            age_cat = age_tmp,
            algorithm = stepsvar)
 
 }
 
-joined = joined %>%
-  mutate(total_guesssteps = total_scsslsteps / 1.5)
 
 var_df = expand_grid(age = unique(as.character(joined$cat_age)),
-                     sex = c("Male", "Female"),
-                     algo = colnames(joined %>% select(contains("steps") & contains("total")))
-                     )
+                     sex = c("Male", "Female", "Overall"),
+                     algo = colnames(joined %>% select(contains("total")))
+)
+
 
 result = pmap_dfr(.l = list(age_tmp = var_df$age,
-                       sex = var_df$sex,
-                       stepsvar = var_df$algo),
-             data = joined,
-             .f = svyquant_general)
+                            sex = var_df$sex,
+                            stepsvar = var_df$algo),
+                  data = joined,
+                  .f = svyquant_general)
 
+write_csv(result, here::here("steps_all_algorithms.csv.gz"))
 
 key = tibble(colname = colnames(joined %>% select(contains("steps") & contains("total"))),
-               name  = c("Actilife", "ADEPT", "Oak", "Stepcount RF", "Stepcount SSL", "Verisense revised", "Verisense",
-                         "Best guess"))
+             name  = c("Actilife", "ADEPT", "Oak", "Stepcount RF", "Stepcount SSL", "Verisense revised", "Verisense",
+                       "Best guess"))
 
 result = result %>%
   left_join(key, by = c("algorithm" = "colname"))
@@ -225,3 +201,6 @@ write_csv(result, here::here("steps_all_algorithms.csv.gz"))
 
 ## now we need to get the survival probabilities
 
+library(tidyverse)
+
+x = read_csv(here::here("steps_all_algorithms.csv.gz"))
