@@ -236,7 +236,7 @@ over_sex_keys$cdf = purrr::map(long_grouped_split, run_cdf)
 
 keys = bind_rows(keys, over_sex_keys)
 
-write_rds(keys, here::here("results", "age_sex_cdf.rds"), compress = "gz")
+write_rds(keys, here::here("results", "age_sex_cdf.rds"), compress = "xz")
 
 
 
