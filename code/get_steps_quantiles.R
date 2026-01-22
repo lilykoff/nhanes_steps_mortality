@@ -188,19 +188,5 @@ result = pmap_dfr(.l = list(age_tmp = var_df$age,
                   data = joined,
                   .f = svyquant_general)
 
-write_csv(result, here::here("steps_all_algorithms.csv.gz"))
 
-key = tibble(colname = colnames(joined %>% select(contains("steps") & contains("total"))),
-             name  = c("Actilife", "ADEPT", "Oak", "Stepcount RF", "Stepcount SSL", "Verisense revised", "Verisense",
-                       "Best guess"))
-
-result = result %>%
-  left_join(key, by = c("algorithm" = "colname"))
-
-write_csv(result, here::here("steps_all_algorithms.csv.gz"))
-
-## now we need to get the survival probabilities
-
-library(tidyverse)
-
-x = read_csv(here::here("steps_all_algorithms.csv.gz"))
+write_csv(result, here::here("results", "age_sex_quantiles.csv.gz"))
