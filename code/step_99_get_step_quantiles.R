@@ -196,7 +196,7 @@ run_cdf = function(data) {
 
 ### Reshape to long format and run CDFs ###
 long = joined %>%
-  select(SEQN, cat_age, gender, wtmec4yr_adj_norm,
+  select(SEQN, data_release_cycle, cat_age, gender, wtmec4yr_adj_norm,
          masked_variance_pseudo_psu, masked_variance_pseudo_stratum,
          contains("total")) %>%
   pivot_longer(cols = contains("total"),
@@ -235,8 +235,46 @@ over_sex_keys = group_keys(long_grouped) %>%
 over_sex_keys$cdf = purrr::map(long_grouped_split, run_cdf)
 
 keys = bind_rows(keys, over_sex_keys)
-
 write_rds(keys, here::here("results", "age_sex_cdf.rds"), compress = "xz")
+
+
+## Run Groups to split the data
+long_grouped = long %>%
+  group_by(data_release_cycle, cat_age, gender, measure)
+long_grouped_split = long_grouped %>%
+  group_split()
+
+# get keys
+keys = group_keys(long_grouped)
+keys$cdf = purrr::map(long_grouped_split, run_cdf)
+
+## Run Age Groups overall
+long_grouped = long %>%
+  group_by(data_release_cycle, cat_age, measure)
+long_grouped_split = long_grouped %>%
+  group_split()
+
+over_age_keys = group_keys(long_grouped) %>%
+  mutate(gender = "Overall")
+over_age_keys$cdf = purrr::map(long_grouped_split, run_cdf)
+keys = bind_rows(keys, over_age_keys)
+
+## Run Sex Groups overall
+long_grouped = long %>%
+  group_by(data_release_cycle, gender, measure)
+long_grouped_split = long_grouped %>%
+  group_split()
+
+over_sex_keys = group_keys(long_grouped) %>%
+  mutate(cat_age = "Overall")
+over_sex_keys$cdf = purrr::map(long_grouped_split, run_cdf)
+
+keys = bind_rows(keys, over_sex_keys)
+
+
+write_rds(keys, here::here("results", "age_sex_cdf_by_wave.rds"), compress = "xz")
+
+
 
 
 
