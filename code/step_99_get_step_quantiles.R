@@ -1,4 +1,4 @@
-##
+## Run this after code/step_06_join_demo_pa.R
 library(tidyverse)
 library(survey)
 reweight_accel = function(data,
