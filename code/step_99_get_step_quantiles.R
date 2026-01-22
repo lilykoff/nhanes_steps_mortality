@@ -166,9 +166,10 @@ svyquant_general = function(data, age_tmp, sex, stepsvar){
       data = temp,
       nest = TRUE
     )
-  svyquantile(~steps, svy_design, quantiles = seq(0, 1, 0.01))$steps[,1] %>% unname() %>%
+  run_quantiles = seq(0, 1, 0.001)
+  svyquantile(~steps, svy_design, quantiles = run_quantiles)$steps[,1] %>% unname() %>%
     as_tibble() %>%
-    mutate(quantile = seq(0, 1, 0.01),
+    mutate(quantile = run_quantiles,
            gender = sex,
            age_cat = age_tmp,
            algorithm = stepsvar)
@@ -186,7 +187,8 @@ result = pmap_dfr(.l = list(age_tmp = var_df$age,
                             sex = var_df$sex,
                             stepsvar = var_df$algo),
                   data = joined,
-                  .f = svyquant_general)
+                  .f = svyquant_general,
+                  .progress = TRUE)
 
 
 write_csv(result, here::here("results", "age_sex_quantiles.csv.gz"))
