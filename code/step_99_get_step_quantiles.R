@@ -143,7 +143,7 @@ joined = reweight_accel(data = df_small,
 
 options(survey.lonely.psu = "adjust")
 
-svyquant_general = function(data, age_tmp, sex, stepsvar){
+svyquant_general = function(data, age_tmp, sex, stepsvar, ci = FALSE){
   if(sex %in% c("Male", "Female")) {
     temp =
       data %>%
@@ -167,7 +167,15 @@ svyquant_general = function(data, age_tmp, sex, stepsvar){
       nest = TRUE
     )
   run_quantiles = seq(0, 1, 0.001)
-  svyquantile(~steps, svy_design, quantiles = run_quantiles)$steps[,1] %>% unname() %>%
+  out = svyquantile(~steps, svy_design, quantiles = run_quantiles,
+                    ci = ci)
+  if (ci) {
+    out = out$steps[,1]
+  } else {
+    out = t(out$steps)
+  }
+  out = out  %>%
+    unname() %>%
     as_tibble() %>%
     mutate(quantile = run_quantiles,
            gender = sex,
