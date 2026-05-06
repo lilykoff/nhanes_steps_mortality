@@ -144,19 +144,20 @@ joined = reweight_accel(data = df_small,
 options(survey.lonely.psu = "adjust")
 
 svyquant_general = function(data, age_tmp, sex, stepsvar, ci = FALSE){
-  if(sex %in% c("Male", "Female")) {
-    temp =
-      data %>%
-      filter(cat_age == age_tmp & gender == sex) %>%
-      mutate(wt_norm = wtmec4yr_adj_norm / mean(wtmec4yr_adj_norm)) %>%
-      rename(steps = {{stepsvar}})
+  stopifnot(length(age_tmp) == 1 && is.character(age_tmp))
+  if (age_tmp != "Overall") {
+    temp = data %>%
+      filter(cat_age == age_tmp)
   } else {
-    temp =
-      data %>%
-      filter(cat_age == age_tmp) %>%
-      mutate(wt_norm = wtmec4yr_adj_norm / mean(wtmec4yr_adj_norm)) %>%
-      rename(steps = {{stepsvar}})
+    temp = data
   }
+  if(sex %in% c("Male", "Female")) {
+    temp = temp %>%
+      filter(gender == sex)
+  }
+  temp = temp %>%
+    mutate(wt_norm = wtmec4yr_adj_norm / mean(wtmec4yr_adj_norm)) %>%
+    rename(steps = {{stepsvar}})
 
   svy_design =
     survey::svydesign(
@@ -176,7 +177,7 @@ svyquant_general = function(data, age_tmp, sex, stepsvar, ci = FALSE){
   } else {
     out = t(out$steps) %>%
       unname()
-    names(out) = "value"
+    colnames(out) = "value"
     out = out %>%
       as_tibble()
   }
@@ -245,8 +246,20 @@ long_grouped_split = long_grouped %>%
 over_sex_keys = group_keys(long_grouped) %>%
   mutate(cat_age = "Overall")
 over_sex_keys$cdf = purrr::map(long_grouped_split, run_cdf)
-
 keys = bind_rows(keys, over_sex_keys)
+
+## Run overall
+long_grouped = long %>%
+  group_by(measure)
+long_grouped_split = long_grouped %>%
+  group_split()
+
+over_keys = group_keys(long_grouped) %>%
+  mutate(cat_age = "Overall",
+         gender = "Overall")
+over_keys$cdf = purrr::map(long_grouped_split, run_cdf)
+
+keys = bind_rows(keys, over_keys)
 write_rds(keys, here::here("results", "age_sex_cdf.rds"), compress = "xz")
 
 
@@ -280,22 +293,35 @@ long_grouped_split = long_grouped %>%
 over_sex_keys = group_keys(long_grouped) %>%
   mutate(cat_age = "Overall")
 over_sex_keys$cdf = purrr::map(long_grouped_split, run_cdf)
-
 keys = bind_rows(keys, over_sex_keys)
 
+## Run overall
+long_grouped = long %>%
+  group_by(data_release_cycle, measure)
+long_grouped_split = long_grouped %>%
+  group_split()
 
+over_keys = group_keys(long_grouped) %>%
+  mutate(cat_age = "Overall",
+         gender = "Overall")
+over_keys$cdf = purrr::map(long_grouped_split, run_cdf)
+
+keys = bind_rows(keys, over_keys)
 write_rds(keys, here::here("results", "age_sex_cdf_by_wave.rds"), compress = "xz")
 
 
 
 
 
-var_df = expand_grid(age = unique(as.character(joined$cat_age)),
+var_df = expand_grid(age = c(unique(as.character(joined$cat_age)), "Overall"),
                      sex = c("Male", "Female", "Overall"),
                      algo = colnames(joined %>% select(contains("total")))
 )
 
 
+L = list(age_tmp = var_df$age,
+         sex = var_df$sex,
+         stepsvar = var_df$algo)
 result = pmap_dfr(.l = list(age_tmp = var_df$age,
                             sex = var_df$sex,
                             stepsvar = var_df$algo),
