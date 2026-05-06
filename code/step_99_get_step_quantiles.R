@@ -170,13 +170,17 @@ svyquant_general = function(data, age_tmp, sex, stepsvar, ci = FALSE){
   out = svyquantile(~steps, svy_design, quantiles = run_quantiles,
                     ci = ci)
   if (ci) {
-    out = out$steps[,1]
+    out = out$steps[,1]  %>%
+      unname() %>%
+      as_tibble()
   } else {
-    out = t(out$steps)
+    out = t(out$steps) %>%
+      unname()
+    names(out) = "value"
+    out = out %>%
+      as_tibble()
   }
-  out = out  %>%
-    unname() %>%
-    as_tibble() %>%
+  out = out %>%
     mutate(quantile = run_quantiles,
            gender = sex,
            age_cat = age_tmp,
