@@ -13,3 +13,4 @@ vignettes/Analysis_files/
 vignettes/NHANES_Steps_Mortality_Vignette_files/
 results/*.rds
 results/*.csv.gz
+.positai

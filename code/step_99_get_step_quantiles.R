@@ -122,7 +122,6 @@ reweight_accel = function(data,
 
 
 
-
 steps_df = read_rds(here::here("data", "covariates_accel_mortality_df.rds"))
 
 df_small =
@@ -133,13 +132,32 @@ df_small =
   filter(valid_accel)
 
 
+
 joined = reweight_accel(data = df_small,
                         demo = steps_df) %>%
   rename(age = age_in_years_at_screening) %>%
   ungroup() %>%
-  mutate(cat_age = cut(age, breaks = c(0,10, 20,30,40,50,60,70,80, 85), include.lowest = FALSE,
+  mutate(cat_age = cut(age, breaks = c(0,10,20,30,40,50,60,70,80, 85), include.lowest = FALSE,
                        right = FALSE))
 
+# need to do this for each total
+joined %>%
+  ggplot(aes(x = total_AC, colour = gender)) + geom_line(stat = "density") +
+  facet_wrap(~ cat_age)
+
+joined %>%
+  ggplot(aes(x = total_AC, colour = cat_age)) + geom_line(stat = "density") +
+  facet_wrap(~ gender) +
+  scale_color_brewer(direction = -1)
+
+joined %>%
+  ggplot(aes(x = total_scsslsteps, colour = gender)) + geom_line(stat = "density") +
+  facet_wrap(~ cat_age)
+
+joined %>%
+  ggplot(aes(x = total_scsslsteps, colour = cat_age)) + geom_line(stat = "density") +
+  facet_wrap(~ gender) +
+  scale_color_brewer(direction = -1)
 
 options(survey.lonely.psu = "adjust")
 
