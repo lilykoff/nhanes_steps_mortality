@@ -159,6 +159,16 @@ joined %>%
   facet_wrap(~ gender) +
   scale_color_brewer(direction = -1)
 
+
+joined %>%
+  ggplot(aes(x = total_scrfsteps, colour = gender)) + geom_line(stat = "density") +
+  facet_wrap(~ cat_age)
+
+joined %>%
+  ggplot(aes(x = total_scrfsteps, colour = cat_age)) + geom_line(stat = "density") +
+  facet_wrap(~ gender) +
+  scale_color_brewer(direction = -1)
+
 options(survey.lonely.psu = "adjust")
 
 svyquant_general = function(data, age_tmp, sex, stepsvar, ci = FALSE){
@@ -233,6 +243,9 @@ long = joined %>%
   pivot_longer(cols = contains("total"),
                names_to = "measure",
                values_to = "steps")
+write_rds(long %>%
+            rename(value = steps), here::here("results", "all_measure_data.rds"), compress = "xz")
+
 
 ## Run Groups to split the data
 long_grouped = long %>%
